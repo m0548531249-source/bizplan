@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://m0548531249-source.github.io/bizplan/sitemap.xml

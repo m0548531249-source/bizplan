@@ -77,7 +77,7 @@
       { k: 'loan.purpose', label: 'מה תעשו עם הכסף, ואיך זה יגדיל את ההכנסות?', type: 'textarea', req: 1, wide: 1, ph: 'למשל: רכישת תנור שני כדי להגדיל את הייצור ב-40%' },
       { k: 'loan.uses', label: 'פירוט: על מה בדיוק יוצא הכסף', type: 'uses', wide: 1 },
       { k: 'loan.years', label: 'לכמה שנים?', type: 'chips', opts: { 3: '3 שנים', 4: '4 שנים', 5: '5 שנים' } },
-      { k: 'loan.graceMonths', label: 'חודשים ראשונים עם ריבית בלבד (גרייס)', type: 'chips', opts: { 0: 'בלי', 3: '3', 6: '6' }, hint: 'נותן לעסק זמן להתחיל להרוויח מההשקעה' },
+      { k: 'loan.graceMonths', label: 'חודשים ראשונים עם ריבית בלבד (גרייס)', type: 'chips', opts: { 0: 'בלי', 3: '3 חודשים', 6: '6 חודשים' }, hint: 'נותן לעסק זמן להתחיל להרוויח מההשקעה' },
       { k: 'loan.ratePct', label: 'ריבית שנתית משוערת', type: 'pct', hint: 'הבנק קובע. להערכה: פריים ועוד 1%–2%, בערך 7.5%' },
     ] },
     { name: 'סיכום', kicker: 'סיכום', title: '', intro: '', fields: [] },
@@ -377,11 +377,34 @@
     const el = $('toast'); el.textContent = msg; el.hidden = false;
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
   }
+  /**
+   * כל ה-CSS של הדף, לקובץ השמור: styles.css (קובץ חיצוני) + תגיות <style> אם יש.
+   * קוראים מ-document.styleSheets. גיליון שהדפדפן חוסם את קריאתו (למשל Google Fonts, או file://)
+   * מוחלף בקישור בכתובת מלאה, כך שהמסמך השמור עדיין מעוצב כשיש רשת.
+   */
+  function collectCss() {
+    const inline = [];
+    const links = [];
+    [...document.styleSheets].forEach((sheet) => {
+      const href = sheet.href || '';
+      if (/fonts\.googleapis\.com/.test(href)) return; // הגופנים נטענים בנפרד בקובץ השמור
+      try {
+        inline.push([...sheet.cssRules].map((r) => r.cssText).join('\n'));
+      } catch (e) {
+        if (href) links.push(href);
+      }
+    });
+    if (!inline.join('').trim()) {
+      [...document.querySelectorAll('style')].forEach((s) => inline.push(s.textContent));
+    }
+    return { css: inline.join('\n'), links };
+  }
   function standaloneHtml() {
-    const css = [...document.querySelectorAll('style')].map((s) => s.textContent).join('\n');
+    const { css, links } = collectCss();
+    const linkTags = links.map((h) => `<link rel="stylesheet" href="${esc(h)}">`).join('');
     const name = $('doc').querySelector('h1')?.textContent || 'העסק';
     return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>תוכנית עסקית – ${esc(name)}</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Assistant:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Assistant:wght@400;600;700&display=swap">${linkTags}
 <style>${css}
 body{padding:24px 16px} .print-bar{max-width:840px;margin:0 auto 16px;display:flex;justify-content:flex-end} @media print{.print-bar{display:none}}</style></head>
 <body><div class="print-bar"><button class="btn btn-primary" onclick="print()">הדפסה / שמירה כ-PDF</button></div>

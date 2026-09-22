@@ -32,7 +32,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir _site && cp index.html engine.js app.js legal.html _site/
+      - run: mkdir _site && cp index.html engine.js app.js legal.html calculator.html calculator.js styles.css sitemap.xml robots.txt _site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
       - id: deployment

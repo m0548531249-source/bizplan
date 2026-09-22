@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>מחשבון הלוואה בערבות מדינה – החזר חודשי ותקרה | תוכנית עסקית בקליק</title>
+<meta name="description" content="מחשבון חינמי: הזינו סכום, תקופה, גרייס וריבית וקבלו החזר חודשי, סך ריבית ובדיקת תקרה. בלי הרשמה, בלי שליחת נתונים לשרת.">
+<link rel="canonical" href="https://m0548531249-source.github.io/bizplan/calculator.html">
+<meta property="og:title" content="מחשבון הלוואה בערבות מדינה – החזר חודשי ותקרה">
+<meta property="og:description" content="הזינו סכום, תקופה, גרייס וריבית וקבלו מיד החזר חודשי, סך ריבית ובדיקת תקרה. חינם, בלי הרשמה.">
+<meta property="og:locale" content="he_IL">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://m0548531249-source.github.io/bizplan/calculator.html">
+<meta name="theme-color" content="#0F4D3A">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F4D3A'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='Arial'%3E%E2%82%AA%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Assistant:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="appbar">
+  <div class="container">
+    <a class="logo" href="./" aria-label="תוכנית עסקית בקליק, לעמוד הראשי"><span class="logo-mark">₪</span>תוכנית עסקית בקליק</a>
+  </div>
+</header>
+
+<main class="wizard calc" id="main">
+  <p class="step-kicker">מחשבון חינמי</p>
+  <h1>כמה תחזירו בחודש על הלוואה בערבות מדינה</h1>
+  <p class="step-intro">כתבו כמה אתם רוצים ללוות, לכמה זמן ובאיזו ריבית, וקבלו מיד את ההחזר החודשי ואת סך הריבית. הכול מחושב כאן בדפדפן, בלי הרשמה ובלי לשלוח נתונים.</p>
+
+  <form class="calc-card" id="calc-form" novalidate>
+    <div class="fields">
+      <div class="field wide" data-field="amount">
+        <label for="c-amount">כמה כסף אתם רוצים ללוות?<span class="req" aria-hidden="true">*</span></label>
+        <div class="money"><input id="c-amount" data-money="1" type="text" inputmode="numeric" autocomplete="off" placeholder="0" required><span class="cur">₪</span></div>
+      </div>
+
+      <div class="field wide" data-field="years">
+        <label id="c-years-l">לכמה זמן?</label>
+        <div class="chips" id="c-years" role="group" aria-labelledby="c-years-l"></div>
+        <span class="hint">בקרן אפשר לפרוס את ההלוואה עד 5 שנים</span>
+      </div>
+
+      <div class="field wide" data-field="graceMonths">
+        <label id="c-grace-l">חודשים ראשונים עם ריבית בלבד (גרייס)</label>
+        <div class="chips" id="c-grace" role="group" aria-labelledby="c-grace-l"></div>
+        <span class="hint">בחודשים האלה משלמים רק ריבית, כדי לתת לעסק זמן להתחיל להרוויח. עד 6 חודשים.</span>
+      </div>
+
+      <div class="field" data-field="ratePct">
+        <label for="c-rate">ריבית שנתית<span class="req" aria-hidden="true">*</span></label>
+        <div class="money"><input id="c-rate" type="text" inputmode="decimal" autocomplete="off" value="7.5" required><span class="cur">%</span></div>
+        <span class="hint">הריבית שהבנק הציע לכם. אין עדיין הצעה? השאירו 7.5% כהערכה.</span>
+      </div>
+
+      <div class="field" data-field="annualSales">
+        <label for="c-sales">מחזור שנתי של העסק (לא חובה)</label>
+        <div class="money"><input id="c-sales" data-money="1" type="text" inputmode="numeric" autocomplete="off" placeholder="0"><span class="cur">₪</span></div>
+        <span class="hint">כמה העסק מוכר בשנה. עוזר לבדוק כמה מותר לבקש.</span>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-lg calc-submit">חשבו</button>
+  </form>
+
+  <section id="result" aria-live="polite" hidden>
+    <div class="snapshot">
+      <h2>התוצאה · מתעדכנת כשמשנים את הנתונים</h2>
+      <div class="snap-grid">
+        <div class="snap-item"><div class="label">החזר חודשי</div><div class="value accent" id="r-monthly"></div><div class="sub" id="r-monthly-sub"></div></div>
+        <div class="snap-item" id="r-grace-item" hidden><div class="label">בחודשי הגרייס</div><div class="value" id="r-grace"></div><div class="sub" id="r-grace-sub"></div></div>
+        <div class="snap-item"><div class="label">סך הריבית לאורך ההלוואה</div><div class="value" id="r-interest"></div><div class="sub" id="r-interest-sub"></div></div>
+      </div>
+      <div class="verdict" id="r-verdict" data-level="ok"><span class="dot"></span><div><b id="r-verdict-title"></b><p id="r-verdict-text"></p></div></div>
+    </div>
+
+    <p class="hint calc-about">הקרן להלוואות בערבות מדינה עוזרת לעסקים קטנים ובינוניים לקבל הלוואה מהבנק: המדינה ערבה לחלק מההלוואה, ולכן קל יותר לקבל אותה ובתנאים טובים יותר. בגלל שהמדינה לוקחת על עצמה חלק מהסיכון, יש הגבלה על הסכום: עד 500,000 ₪, או עד 8% מהמחזור השנתי אם זה יותר. המחשבון נותן הערכה בלבד. התנאים הסופיים נקבעים בבנק ובקרן.</p>
+
+    <div class="cta-row">
+      <a class="btn btn-primary btn-lg" href="./">בנו לי תוכנית עסקית מלאה</a>
+      <a class="btn-text" href="mailto:kodesh.labs.tachlis.ai@gmail.com?subject=%D7%A8%D7%A2%D7%99%D7%95%D7%9F%20%D7%9C%D7%9E%D7%97%D7%A9%D7%91%D7%95%D7%9F%20%D7%94%D7%9C%D7%95%D7%95%D7%90%D7%94%20%D7%91%D7%A2%D7%A8%D7%91%D7%95%D7%AA%20%D7%9E%D7%93%D7%99%D7%A0%D7%94">ספרו לנו מה חסר</a>
+    </div>
+  </section>
+</main>
+
+<div class="container">
+  <footer class="site-foot">
+    <span>תוכנית עסקית בקליק · כלי עזר, לא ייעוץ פיננסי · לא קשור לממשלה או לקרן</span>
+    <nav class="foot-links" aria-label="קישורים">
+      <a href="mailto:kodesh.labs.tachlis.ai@gmail.com?subject=%D7%9E%D7%A9%D7%95%D7%91%20%D7%A2%D7%9C%20%D7%AA%D7%95%D7%9B%D7%A0%D7%99%D7%AA%20%D7%A2%D7%A1%D7%A7%D7%99%D7%AA%20%D7%91%D7%A7%D7%9C%D7%99%D7%A7">מצאתם טעות? כתבו לנו</a>
+      <a href="./">לבניית תוכנית עסקית מלאה</a>
+      <a href="legal.html">פרטיות ותנאי שימוש</a>
+    </nav>
+  </footer>
+</div>
+
+<script src="engine.js"></script>
+<script src="calculator.js"></script>
+</body>
+</html>
