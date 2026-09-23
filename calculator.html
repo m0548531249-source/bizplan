@@ -59,7 +59,7 @@
       <div class="field" data-field="annualSales">
         <label for="c-sales">מחזור שנתי של העסק (לא חובה)</label>
         <div class="money"><input id="c-sales" data-money="1" type="text" inputmode="numeric" autocomplete="off" placeholder="0"><span class="cur">₪</span></div>
-        <span class="hint">כמה העסק מוכר בשנה. עוזר לבדוק כמה מותר לבקש.</span>
+        <span class="hint">כמה העסק מוכר בשנה. עוזר לבדוק כמה מותר לבקש, והאם ההחזר מתאים להכנסה. אין לכם מחזור עדיין? השאירו ריק – התקרה הבסיסית תחול.</span>
       </div>
     </div>
     <button type="submit" class="btn btn-primary btn-lg calc-submit">חשבו</button>
@@ -74,7 +74,10 @@
         <div class="snap-item"><div class="label">סך הריבית לאורך ההלוואה</div><div class="value" id="r-interest"></div><div class="sub" id="r-interest-sub"></div></div>
       </div>
       <div class="verdict" id="r-verdict" data-level="ok"><span class="dot"></span><div><b id="r-verdict-title"></b><p id="r-verdict-text"></p></div></div>
+      <p class="hint verdict-note" id="r-note"></p>
     </div>
+
+    <section class="calc-card help-card" id="r-help" hidden></section>
 
     <p class="hint calc-about">הקרן להלוואות בערבות מדינה עוזרת לעסקים קטנים ובינוניים לקבל הלוואה מהבנק: המדינה ערבה לחלק מההלוואה, ולכן קל יותר לקבל אותה ובתנאים טובים יותר. בגלל שהמדינה לוקחת על עצמה חלק מהסיכון, יש הגבלה על הסכום: עד 500,000 ₪, או עד 8% מהמחזור השנתי אם זה יותר. המחשבון נותן הערכה בלבד. התנאים הסופיים נקבעים בבנק ובקרן.</p>
 

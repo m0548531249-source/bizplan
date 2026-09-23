@@ -63,6 +63,7 @@
     const graceInterest = graceMonths > 0 ? schedule[0].payment : 0;
     const totalInterest = schedule.reduce((s, r) => s + r.interest, 0);
     const cap = E.maxLoan(annualSales);
+    const monthlySales = annualSales / 12;
     return {
       monthlyPayment,
       graceInterest,
@@ -73,10 +74,88 @@
       cap,
       hasSales: annualSales > 0,
       withinCap: amount <= cap,
+      monthlySales,
+      // null כשאין מחזור – בלי מחזור אי אפשר לדעת איזה נתח ההחזר תופס
+      afford: E.affordLevel(monthlyPayment, monthlySales),
     };
   }
 
-  const api = { YEARS, GRACE, MIN_AMOUNT, DEFAULT_RATE, parseMoney, parseRate, validate, calculate };
+  // הניסוחים של שורת יכולת ההחזר, לפי אישור מאיר (12% / 20%)
+  const AFFORD_TEXT = {
+    ok: '✓ ההחזר נראה סביר ביחס למחזור שלכם.',
+    warn: 'שימו לב – זה נתח גדול מההכנסה החודשית. יש כמה כיוונים למטה שיכולים לעזור.',
+    risk: 'ההחזר הזה כנראה גבוה מדי ביחס להכנסה החודשית. כדאי לבדוק את ההצעות למטה לפני שממשיכים.',
+  };
+  const NOTE_ESTIMATE = 'אומדן שמרני של הכלי בלבד – לא כלל רשמי של בנק או של הקרן. האישור הסופי תלוי גם בביטחונות, בהיסטוריית האשראי ובמסמכים נוספים שהבנק מבקש.';
+  const NOTE_NO_SALES = 'אומדן בלבד. האישור הסופי תלוי גם בביטחונות, בהיסטוריית האשראי ובמסמכים נוספים שהבנק מבקש.';
+  const TRACKS_LINK = 'https://www.chamber.org.il/serviceslobby/114637/114726/';
+
+  const pct0 = (n) => `${Math.round(n)}%`;
+
+  /**
+   * "מה אפשר לעשות" – עד 4 כיוונים עם מספרים אמיתיים. מחזיר null כשאין צורך (אין מחזור, או ההחזר סביר).
+   * כל המספרים מגיעים מ-engine.js; כאן רק הניסוח.
+   */
+  function advice(input, result, E) {
+    if (!result.afford || result.afford.level === 'ok') return null;
+    const ils = E.ils;
+    const target = (result.monthlySales * E.AFFORD.okPct) / 100;
+    const o = E.repaymentOptions(input, target);
+    const items = [];
+    // פריטים שאין בהם פעולה ("כבר המקסימום") – מוצגים רק כשאין שום הצעה אחרת,
+    // כדי שרשימת "מה אפשר לעשות" לא תכלול שורות שאי אפשר לעשות בהן דבר.
+    const notes = [];
+
+    const recAmount = Math.min(o.suggestedAmount, result.cap);
+    const recPayment = recAmount === o.suggestedAmount
+      ? o.suggestedPayment
+      : E.spitzerPayment(recAmount, Number(input.ratePct) || 0, Math.max(1, Number(input.years) * 12 - (Number(input.graceMonths) || 0)));
+    if (recAmount > 0 && recAmount < Number(input.amount)) {
+      items.push({
+        lead: `כ-${ils(recAmount)} במקום ${ils(input.amount)}`,
+        text: `ההחזר יירד לכ-${ils(recPayment)} בחודש, שהם כ-${pct0((recPayment / result.monthlySales) * 100)} מההכנסה החודשית. זה אומדן לבדיקה מול הבנק, לא המלצה סופית.`,
+      });
+    }
+
+    if (o.extend) {
+      items.push({
+        lead: `${o.extend.years} שנים במקום ${input.years}`,
+        text: `ההחזר יירד מכ-${ils(o.extend.current)} לכ-${ils(o.extend.payment)} בחודש – הקלה של כ-${ils(o.extend.saving)} בחודש. בסך הכול תשלמו יותר ריבית, כי ההלוואה נפרסת על יותר זמן.`,
+      });
+    } else if (o.atMaxYears) {
+      notes.push({
+        lead: '5 שנים – כבר המקסימום',
+        text: 'בחרתם את התקופה הארוכה ביותר שהמסלול מאפשר, כך שאי אפשר להקטין את ההחזר על ידי הארכה נוספת.',
+      });
+    }
+
+    if (o.grace) {
+      items.push({
+        lead: `${o.grace.months} חודשי גרייס`,
+        text: `בחודשים הראשונים תשלמו ריבית בלבד – כ-${ils(o.grace.during)} בחודש. אחר כך ההחזר יעלה לכ-${ils(o.grace.after)} בחודש, כי נשארים פחות חודשים להחזיר בהם את הקרן. גרייס קונה זמן, אבל לא מקטין את הפער בין גודל ההלוואה למחזור.`,
+      });
+    } else if (o.atMaxGrace) {
+      notes.push({
+        lead: 'גרייס – כבר המקסימום',
+        text: 'בחרתם את הגרייס הארוך ביותר שהמסלול מאפשר (6 חודשים). גרייס ממילא קונה זמן בלבד: אחריו ההחזר עולה.',
+      });
+    }
+
+    if (o.gap > 0) {
+      items.push({
+        lead: `כ-${ils(o.gap)} להשלים ממקור אחר`,
+        text: 'אפשר להשלים את ההפרש מהון עצמי, משותף או מהמשפחה. אפשר גם לבדוק מסלולים נוספים באותה קרן – יצואנים, חקלאים, עמותות ויזמות חברתית, השקעות ירוקות ומסלולים זמניים – או קרן אחרת כמו קרן קורת, שמיועדת לעסקים שמתקשים באשראי בנקאי רגיל. כדאי לבדוק זכאות ישירות מול הגוף הרלוונטי.',
+        linkText: 'רשימת המסלולים בקרן',
+        href: TRACKS_LINK,
+      });
+    }
+
+    if (!items.length) items.push(...notes);
+
+    return { level: result.afford.level, items: items.slice(0, 4) };
+  }
+
+  const api = { YEARS, GRACE, MIN_AMOUNT, DEFAULT_RATE, AFFORD_TEXT, NOTE_ESTIMATE, NOTE_NO_SALES, parseMoney, parseRate, validate, calculate, advice };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
   root.Calculator = api;
 
@@ -87,6 +166,7 @@
   const $ = (id) => doc.getElementById(id);
   const num = (n) => new Intl.NumberFormat('he-IL', { maximumFractionDigits: 0 }).format(Math.round(n || 0));
   const ils = E.ils;
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const state = { years: 5, graceMonths: 0 };
   let calculated = false; // אחרי החישוב הראשון התוצאה מתעדכנת תוך כדי הקלדה
@@ -133,19 +213,35 @@
       $('r-grace-sub').textContent = r.graceMonths === 1 ? 'בחודש הראשון: ריבית בלבד' : `ב-${r.graceMonths} החודשים הראשונים: ריבית בלבד`;
     }
     const v = $('r-verdict');
-    v.dataset.level = r.withinCap ? 'ok' : 'risk';
-    $('r-verdict-title').textContent = r.withinCap
-      ? '✓ הסכום בתוך הטווח המקובל להלוואה כזו'
-      : 'הסכום גבוה מהטווח המקובל להלוואה כזו';
-    let text;
-    if (r.hasSales) {
-      text = `לפי מחזור של ${ils(input.annualSales)} בשנה, אפשר לבקש עד ${ils(r.cap)}.`;
-      if (!r.withinCap) text += ' כדאי להקטין את הסכום.';
+    const capText = r.hasSales
+      ? `לפי מחזור של ${ils(input.annualSales)} בשנה, אפשר לבקש עד ${ils(r.cap)}${r.withinCap ? '' : ' – וביקשתם יותר'}.`
+      : `אפשר לבקש עד ${ils(r.cap)}. עסק שמוכר ביותר מ-6.25 מיליון ₪ בשנה יכול לבקש יותר: הזינו את המחזור למעלה.`;
+    if (r.afford) {
+      // שורה ראשונה תמיד: איזה נתח ההחזר תופס. חריגה מהתקרה מחמירה את הרמה בכל מקרה.
+      v.dataset.level = r.withinCap ? r.afford.level : 'risk';
+      $('r-verdict-title').textContent = `ההחזר לוקח כ-${pct0(r.afford.pct)} מההכנסה החודשית שלכם`;
+      $('r-verdict-text').textContent = `${AFFORD_TEXT[r.afford.level]} ${capText}`;
     } else {
-      text = `אפשר לבקש עד ${ils(r.cap)}. עסק שמוכר ביותר מ-6.25 מיליון ₪ בשנה יכול לבקש יותר: הזינו את המחזור למעלה.`;
+      v.dataset.level = r.withinCap ? 'ok' : 'risk';
+      $('r-verdict-title').textContent = r.withinCap
+        ? '✓ הסכום בתוך הטווח המקובל להלוואה כזו'
+        : 'הסכום גבוה מהטווח המקובל להלוואה כזו';
+      $('r-verdict-text').textContent = r.withinCap || !r.hasSales ? capText : `${capText} כדאי להקטין את הסכום.`;
     }
-    $('r-verdict-text').textContent = text;
+    $('r-note').textContent = r.afford ? NOTE_ESTIMATE : NOTE_NO_SALES;
+    renderHelp(advice(input, r, E));
     $('result').hidden = false;
+  }
+
+  /** כרטיס "מה אפשר לעשות" – רק כשההחזר גבוה ביחס למחזור */
+  function renderHelp(help) {
+    const card = $('r-help');
+    if (!help || !help.items.length) { card.hidden = true; card.innerHTML = ''; return; }
+    card.innerHTML = `<h2>מה אפשר לעשות</h2>
+      <ol class="helps">${help.items.map((it, i) => `<li><span class="logo-mark" aria-hidden="true">${i + 1}</span><div><b>${esc(it.lead)}</b>
+        <p>${esc(it.text)}${it.href ? ` <a class="btn-text" href="${esc(it.href)}" target="_blank" rel="noopener">${esc(it.linkText)}</a>` : ''}</p></div></li>`).join('')}</ol>
+      <p class="help-foot"><a class="btn-text" href="./">לחישוב מדויק יותר – עברו לאשף המלא</a> <span class="hint">שם אפשר להראות גם את הצמיחה בהכנסות אחרי ההשקעה, מה שעשוי לשפר את התמונה.</span></p>`;
+    card.hidden = false;
   }
 
   function run(scroll) {
