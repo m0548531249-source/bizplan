@@ -213,7 +213,7 @@ test('KPI 4: המסמך של עסק חדש לא מדבר על היסטוריה �
   assert.ok(!app.includes('פועל 0 שנים'));
   assert.ok(app.includes('הוא עסק חדש בתחום'), 'תקציר המנהלים מנוסח לעסק חדש');
   assert.ok(app.includes('העסק טרם נפתח; ההנחות בתחזית מבוססות על תוכנית העסק'), 'הנחות התחזית – פרק 6');
-  assert.ok(app.includes('מקורות המימון') && app.includes('סה"כ השקעה'), 'מקורות ושימושים – פרק 5');
+  assert.ok(app.includes('מקורות המימון') && app.includes('סה"כ מקורות'), 'מקורות ושימושים – פרק 5');
   assert.ok(app.includes('בעסק חדש כל התחזית מבוססת על הערכה ולא על ביצועים בפועל'), 'אזהרת אי-ודאות – פרק 9');
   assert.ok(app.includes('טוב לדעת מראש') && app.includes('נהוג לדרוש הון עצמי'), 'תיבת המידע על ההון העצמי');
   assert.ok(app.includes('ערבות אישית של הבעלים'), 'טקסט קבוע על ביטחונות וערבות');
@@ -280,33 +280,47 @@ test('חודשי מינוס: אותו ניסוח משמש גם במסך הסיכ
   assert.ok(!/negativeMonths\.join\(/.test(app), 'הרשימה הישנה ("1, 2, 3, ...") הוסרה');
 });
 
-test('סתירת הקמה: שימושי הלוואה גבוהים מעלויות ההקמה מחזירים הסבר עם שני הסכומים', () => {
+// setupMismatch הוסרה בסבב QA 4 (באג #3): עלויות ההקמה הן מקור האמת היחיד לשימושים,
+// ולכן "סתירה" בין שתי רשימות אינה אפשרית יותר. במקומה workingCapitalNote מסבירה
+// מה נעשה בכסף שנשאר מעל עלויות ההקמה.
+test('עודף מקורות: ההפרש בין עלויות ההקמה למקורות מוסבר כהון חוזר, ולא כסתירה', () => {
   const plan = {
-    startup: { setupCosts: [{ item: 'שיפוץ', amount: 150000 }] },
-    loan: { uses: [{ item: 'ציוד', amount: 200000 }, { item: 'הון חוזר', amount: 80000 }] },
+    business: { isNew: true },
+    startup: { equity: 80000, setupCosts: [{ item: 'שיפוץ', amount: 150000 }] },
+    loan: { amount: 200000, uses: [] },
   };
-  const msg = E.setupMismatch(plan);
-  assert.ok(msg, 'יש סתירה ולכן יש הודעה');
-  assert.ok(msg.includes('150,000') && msg.includes('280,000'), 'שני הסכומים מופיעים בהודעה');
+  const msg = E.workingCapitalNote(plan);
+  assert.ok(msg, 'יש עודף ולכן יש הסבר');
+  assert.ok(msg.includes('150,000') && msg.includes('280,000') && msg.includes('130,000'), 'שני הסכומים וההפרש מופיעים');
+  assert.ok(msg.includes('הון חוזר'), 'ההפרש מוסבר, לא מוצג כשגיאה');
   assert.ok(!/DSCR|רמפ|capex/i.test(msg), 'בלי ז\'רגון');
 });
 
-test('סתירת הקמה: אין הודעה כשהעלויות מכסות את השימושים, כשאין עלויות, או על הפרש זניח', () => {
-  const mk = (setup, uses) => ({ startup: { setupCosts: [{ item: 'א', amount: setup }] }, loan: { uses: [{ item: 'ב', amount: uses }] } });
-  assert.equal(E.setupMismatch(mk(300000, 280000)), null, 'עלויות ההקמה גדולות מהשימושים');
-  assert.equal(E.setupMismatch(mk(280000, 280000)), null, 'שווה');
-  assert.equal(E.setupMismatch(mk(0, 280000)), null, 'לא מילאו עלויות הקמה – לא מטרידים');
-  assert.equal(E.setupMismatch(mk(280000, 280001)), null, 'הפרש של שקל הוא עיגול, לא סתירה');
-  assert.equal(E.setupMismatch({}), null);
-  assert.equal(E.setupMismatch(null), null);
+test('עודף מקורות: אין הסבר כשאין עודף, כשאין עלויות הקמה, או בעסק פועל', () => {
+  const mk = (setup, loan, equity, isNew = true) => ({
+    business: { isNew }, startup: { equity, setupCosts: [{ item: 'א', amount: setup }] }, loan: { amount: loan, uses: [] },
+  });
+  assert.equal(E.workingCapitalNote(mk(300000, 280000, 0)), null, 'עלויות ההקמה גדולות מהמקורות – בדיקת התקינות תטפל בזה');
+  assert.equal(E.workingCapitalNote(mk(280000, 280000, 0)), null, 'שווה');
+  assert.equal(E.workingCapitalNote(mk(0, 280000, 0)), null, 'לא מילאו עלויות הקמה');
+  assert.equal(E.workingCapitalNote(mk(280000, 280001, 0)), null, 'הפרש של שקל הוא עיגול');
+  assert.equal(E.workingCapitalNote(mk(150000, 280000, 0, false)), null, 'בעסק פועל אין שלב הקמה');
+  assert.equal(E.workingCapitalNote({}), null);
+  assert.equal(E.workingCapitalNote(null), null);
 });
 
-test('סתירת הקמה: האזהרה לא נכנסת ל-validatePlan ולכן לא שוברת תוכנית תקינה', () => {
+test('שימושים נגזרים: עסק בהקמה עם עלויות הקמה קטנות מהמקורות נשאר תקין ומאוזן', () => {
   const plan = {
+    business: { isNew: true },
     forecast: { annualSales: 900000 },
-    startup: { setupCosts: [{ item: 'שיפוץ', amount: 150000 }] },
+    startup: { equity: 0, setupCosts: [{ item: 'שיפוץ', amount: 150000 }] },
     loan: { track: 'startup', amount: 300000, ratePct: 7.5, years: 5, graceMonths: 6, uses: [{ item: 'שיפוץ', amount: 300000, type: 'capex' }] },
   };
   assert.deepEqual(E.validatePlan(plan), [], 'validatePlan נשאר נקי');
-  assert.ok(E.setupMismatch(plan), 'הסתירה עצמה כן מזוהה בנפרד');
+  assert.equal(E.usesTotal(plan), 300000, 'השימושים מסתכמים בסך המקורות');
+  assert.equal(E.investmentTotal(plan), 150000, 'ההשקעה בתזרים היא עלויות ההקמה בלבד');
+  const uses = E.planUses(plan);
+  assert.equal(uses.length, 2, 'עלות ההקמה ועוד הון חוזר');
+  assert.equal(uses[1].amount, 150000);
+  assert.equal(uses[1].type, 'working');
 });

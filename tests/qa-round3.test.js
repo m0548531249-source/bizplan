@@ -26,23 +26,26 @@ function newPlan(over) {
 
 // ---------- באג 1: המסמך לא מצהיר הצהרה לא נכונה על עצמו ----------
 
-test('עלויות הקמה: כשיש סתירה המסמך לא אומר "הטבלה כוללת את כל עלויות ההקמה"', () => {
+// עודכן בסבב QA 4 (באג #3): במקום "לזהות סתירה בין שתי רשימות ולהסביר אותה",
+// עלויות ההקמה הן מקור האמת היחיד והשימושים נגזרים ממנה, ולכן הסתירה לא נוצרת מראש.
+test('עלויות הקמה: המסמך לא מציג שני סכומים לאותו כסף, כי טבלת השימושים נגזרת מהמנוע', () => {
   const app = read('app.js');
-  assert.ok(app.includes('const setupPartial = isNew && !!E.setupMismatch(p)'), 'המסמך בודק את הסתירה לפני שהוא כותב את ההערה');
-  const note = (app.match(/const setupNote = setupPartial[\s\S]*?;\n/) || [''])[0];
-  assert.ok(note.includes('נמוכות משימושי ההלוואה'), 'יש שורה שמיישבת את הפער');
-  assert.ok(note.includes('הטבלה כוללת את כל עלויות ההקמה'), 'הניסוח המקורי נשמר למקרה שאין סתירה');
-  assert.ok(!/DSCR|רמפ|capex/.test(note), 'בלי ז\'רגון');
-  // ההערה והכותרת נגזרות מהדגל, ולא מודפסות תמיד
-  assert.ok(!app.includes('<p class="note">הטבלה כוללת את כל עלויות ההקמה'), 'המשפט לא מודפס עוד ללא תנאי');
-  assert.ok(app.includes('${setupHeading}') && app.includes('${esc(setupNote)}'), 'הכותרת וההערה מגיעות מהמשתנים');
-  assert.ok(app.includes("setupPartial ? 'פירוט עלויות ההקמה' : 'עלות ההקמה המלאה'"), 'גם הכותרת "המלאה" לא נשארת כשהפירוט חלקי');
+  assert.ok(app.includes('const usesTotalSum = res.usesTotal'), 'סך השימושים מגיע מהמנוע');
+  assert.ok(/\.\.\.res\.uses\.map\(/.test(app), 'שורות הטבלה נגזרות מ-res.uses ולא מרשימה שהוזנה שוב');
+  assert.ok(!app.includes('setupMismatch'), 'מכניזם ה"סתירה" הוסר');
+  assert.ok(!app.includes('נמוכות משימושי ההלוואה'), 'ההתנצלות על ההפרש הוסרה');
+  assert.ok(app.includes('סך המקורות') && app.includes('שווה לסך השימושים'), 'במקומה טבלת התאמה מקורות מול שימושים');
 });
 
-test('עלויות הקמה: המקרה של תמר מזוהה כסתירה, ומקרה שלם לא', () => {
-  assert.ok(E.setupMismatch(newPlan()), '150,000 מול 280,000 – סתירה');
-  const full = newPlan({ startup: { equity: 120000, setupCosts: [{ item: 'שיפוץ', amount: 300000 }] } });
-  assert.equal(E.setupMismatch(full), null, 'פירוט מלא – אין סתירה');
+test('עלויות הקמה: המקרה של תמר מאוזן אוטומטית – הון חוזר במקום סתירה', () => {
+  const p = newPlan(); // עלויות הקמה 150,000, הלוואה 280,000, הון עצמי 120,000
+  const uses = E.planUses(p);
+  assert.equal(E.setupCostsTotal(p), 150000);
+  assert.equal(E.sourcesTotal(p), 400000);
+  assert.equal(E.usesTotal(p), 400000, 'סך השימושים שווה לסך המקורות, בלי הפרש שלא פורט');
+  assert.equal(uses[uses.length - 1].amount, 250000, 'ההפרש מוצג כהון חוזר');
+  const full = newPlan({ startup: { equity: 120000, setupCosts: [{ item: 'שיפוץ', amount: 400000 }] } });
+  assert.equal(E.planUses(full).length, 1, 'כשההקמה מכסה את כל המקורות אין שורת הון חוזר');
 });
 
 // ---------- באג 2: ההון העצמי נכנס לתזרים ----------

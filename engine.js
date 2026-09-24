@@ -17,6 +17,85 @@
   };
 
   /**
+   * טבלאות המס – קונפיגורציה שמתעדכנת כל שנה, ולא מספרים מפוזרים בקוד.
+   * הערכה בלבד: המדרגות והשיעורים נכונים לשנת המס 2025 ומשמשים גם כהערכה ל-2026.
+   * TAX.note הוא הטקסט שמוצג במסמך – חובה לאמת מול רואה חשבון לפני הגשה.
+   */
+  const TAX = {
+    year: 2025,
+    // מדרגות מס הכנסה ליחיד, הכנסה שנתית מיגיעה אישית
+    brackets: [
+      { upTo: 84120, ratePct: 10 },
+      { upTo: 120720, ratePct: 14 },
+      { upTo: 193800, ratePct: 20 },
+      { upTo: 269280, ratePct: 31 },
+      { upTo: 560280, ratePct: 35 },
+      { upTo: 721560, ratePct: 47 },
+      { upTo: Infinity, ratePct: 50 }, // 47% ועוד מס יתר של 3% על החלק שמעל
+    ],
+    creditPoints: 2.25,        // נקודות זיכוי לתושב ישראל (ברירת מחדל שמרנית)
+    creditPointValue: 2904,    // ₪ לשנה לנקודת זיכוי
+    // ביטוח לאומי לעצמאי
+    ni: {
+      reducedRatePct: 2.87,    // עד 60% מהשכר הממוצע
+      fullRatePct: 12.83,      // מעל זה ועד התקרה
+      reducedUpTo: 90264,      // 60% מהשכר הממוצע, בשנה
+      ceiling: 588360,         // תקרת ההכנסה לביטוח לאומי, בשנה
+      deductibleShare: 0.52,   // 52% מדמי הביטוח מוכרים כהוצאה לצורכי מס הכנסה
+    },
+    companyRatePct: 23,        // מס חברות
+    // ניסוח כללי שנכון לכל צורות ההתאגדות: שיטת החישוב עצמה מוצגת במסמך לפי ההתאגדות
+    // (taxMethodText), וההערה הזו הייתה סותרת אותה בחברה בע"מ (ממצא QA סבב 4).
+    note: '',
+  };
+  TAX.note = `חישוב המס הוא הערכה של הכלי לפי כללי המס לשנת ${TAX.year} ולפי צורת ההתאגדות שנבחרה, ואינו מחליף ייעוץ. יש לאמת אותו מול רואה חשבון.`;
+
+  /** מס הכנסה לפי מדרגות, לפני נקודות זיכוי */
+  function bracketTax(income) {
+    let left = Math.max(0, Number(income) || 0);
+    let prev = 0;
+    let tax = 0;
+    for (const b of TAX.brackets) {
+      const slice = Math.min(left, b.upTo - prev);
+      if (slice <= 0) break;
+      tax += slice * b.ratePct / 100;
+      left -= slice;
+      prev = b.upTo;
+    }
+    return tax;
+  }
+
+  /** דמי ביטוח לאומי לעצמאי: שיעור מופחת עד 60% מהשכר הממוצע, שיעור מלא עד התקרה */
+  function nationalInsurance(income) {
+    const inc = Math.min(Math.max(0, Number(income) || 0), TAX.ni.ceiling);
+    const reduced = Math.min(inc, TAX.ni.reducedUpTo);
+    const full = Math.max(0, inc - TAX.ni.reducedUpTo);
+    return reduced * TAX.ni.reducedRatePct / 100 + full * TAX.ni.fullRatePct / 100;
+  }
+
+  /**
+   * המס על הרווח לפי צורת ההתאגדות.
+   * עוסק מורשה ושותפות: מדרגות מס הכנסה (בניכוי נקודות זיכוי) וביטוח לאומי.
+   * חברה בע"מ: מס חברות בלבד (משיכת שכר או דיבידנד מהחברה אינה מחושבת כאן).
+   * @returns {{incomeTax:number, ni:number, total:number, effectivePct:number, entity:string}}
+   */
+  function taxFor(preTaxProfit, entity) {
+    const profit = Math.max(0, Number(preTaxProfit) || 0);
+    const ent = entity === 'company' ? 'company' : entity === 'partnership' ? 'partnership' : 'osek';
+    if (!(profit > 0)) return { incomeTax: 0, ni: 0, total: 0, effectivePct: 0, entity: ent };
+    if (ent === 'company') {
+      const incomeTax = profit * TAX.companyRatePct / 100;
+      return { incomeTax, ni: 0, total: incomeTax, effectivePct: (incomeTax / profit) * 100, entity: ent };
+    }
+    const ni = nationalInsurance(profit);
+    const taxable = Math.max(0, profit - ni * TAX.ni.deductibleShare);
+    const credits = TAX.creditPoints * TAX.creditPointValue;
+    const incomeTax = Math.max(0, bracketTax(taxable) - credits);
+    const total = incomeTax + ni;
+    return { incomeTax, ni, total, effectivePct: (total / profit) * 100, entity: ent };
+  }
+
+  /**
    * ספי יכולת החזר (אחוז ההחזר החודשי מתוך המחזור החודשי).
    * אומדן שמרני של הכלי – אין לו מקור רשמי של בנק ישראל או של הקרן.
    * נגזר מ-DSCR 1.25 הנדרש בקרן ומשוליים ריאליים של כ-15.5% מהמחזור: 15.5 / 1.25 ≈ 12.4.
@@ -88,7 +167,8 @@
 
   /**
    * תחזית רווח והפסד ל-3 שנים.
-   * f: {annualSales, growthPct, cogsPct, monthlyFixed, monthlySalaries, ownerDrawMonthly, taxRatePct, rampMonths}
+   * f: {annualSales, growthPct, cogsPct, monthlyFixed, monthlySalaries, ownerDrawMonthly, entity, rampMonths}
+   * המס נגזר מצורת ההתאגדות (f.entity) ומגובה הרווח, ולא משיעור שטוח.
    */
   function forecast(f, schedule) {
     const debt = debtByYear(schedule || []);
@@ -109,13 +189,15 @@
       const ebitda = revenue - cogs - fixed - salaries;
       const d = debt[y - 1] || { payment: 0, interest: 0 };
       const preTax = ebitda - d.interest;
-      const tax = Math.max(0, preTax) * (f.taxRatePct || 0) / 100;
+      const t = taxFor(preTax, f.entity);
+      const tax = t.total;
       const net = preTax - tax;
       const ownerDraw = (f.ownerDrawMonthly || 0) * 12;
       const cfads = ebitda - tax - ownerDraw; // מזומן פנוי לשירות החוב
       return {
         year: y, revenue, cogs, grossProfit: revenue - cogs, fixed, salaries, ebitda,
-        interest: d.interest, preTax, tax, net, ownerDraw, debtService: d.payment, cfads,
+        interest: d.interest, preTax, tax, incomeTax: t.incomeTax, ni: t.ni, taxEffectivePct: t.effectivePct,
+        net, ownerDraw, debtService: d.payment, cfads,
         dscr: d.payment > 0 ? cfads / d.payment : Infinity,
       };
     });
@@ -126,11 +208,20 @@
    * uses: [{item, amount, type:'capex'|'working'}] – השקעות (capex) יוצאות בחודש 1.
    * equity: הון עצמי שהבעלים מכניס לעסק. נכנס כתקבול בחודש 1, בדיוק כמו ההלוואה,
    * כדי שהתזרים יתיישב עם "סך ההשקעה" שמוצג בפרק המקורות והשימושים.
+   * opts.capex: סך ההשקעות שיוצאות בחודש 1. כשהוא מועבר הוא מקור האמת (בעסק בהקמה –
+   * טבלת עלויות ההקמה), וכשהוא לא מועבר הוא נגזר משורות ה-capex ב-uses.
+   * opts.monthlyTax: תשלום מס חודשי (הערכה: 1/12 מהמס השנתי). בלעדיו התזרים היה מציג
+   * מזומן שהעסק לא באמת מחזיק, בזמן שפרק יכולת ההחזר כבר מנכה את המס.
+   * תאימות לאחור: מותר להעביר מספר במקום opts, והוא ייקרא כ-capex.
    */
-  function cashflow(f, loanAmount, uses, schedule, equity) {
+  function cashflow(f, loanAmount, uses, schedule, equity, opts) {
+    const o = opts && typeof opts === 'object' ? opts : { capex: opts };
     let cash = (f.openingCash || 0);
     const monthly = f.annualSales / 12;
-    const capex = (uses || []).filter((u) => u.type === 'capex').reduce((s, u) => s + (Number(u.amount) || 0), 0);
+    const capex = o.capex != null && Number.isFinite(Number(o.capex))
+      ? Math.max(0, Number(o.capex))
+      : (uses || []).filter((u) => u.type === 'capex').reduce((s, u) => s + (Number(u.amount) || 0), 0);
+    const monthlyTax = Math.max(0, Number(o.monthlyTax) || 0);
     const eq = Math.max(0, Number(equity) || 0);
     const rows = [];
     for (let m = 1; m <= 12; m++) {
@@ -143,11 +234,12 @@
       const draw = f.ownerDrawMonthly || 0;
       const debt = (schedule && schedule[m - 1]) ? schedule[m - 1].payment : 0;
       const invest = m === 1 ? capex : 0;
+      const tax = monthlyTax;
       const opening = cash;
       const inflow = revenue + loanIn + equityIn;
-      const outflow = cogs + fixed + salaries + draw + debt + invest;
+      const outflow = cogs + fixed + salaries + draw + debt + invest + tax;
       cash = opening + inflow - outflow;
-      rows.push({ month: m, opening, revenue, loanIn, equityIn, cogs, fixed, salaries, draw, debt, invest, inflow, outflow, closing: cash });
+      rows.push({ month: m, opening, revenue, loanIn, equityIn, cogs, fixed, salaries, draw, debt, invest, tax, inflow, outflow, closing: cash });
     }
     return rows;
   }
@@ -245,8 +337,9 @@
     if (plan.loan.amount > cap) w.push(`סכום ההלוואה (${ils(plan.loan.amount)}) גבוה מהתקרה במסלול (${ils(cap)}).`);
     if (plan.loan.years > FUND.maxYears) w.push(`תקופת ההלוואה במסלול היא עד ${FUND.maxYears} שנים.`);
     if (plan.loan.graceMonths > FUND.maxGraceMonths) w.push(`גרייס של עד ${FUND.maxGraceMonths} חודשים בלבד.`);
-    const usesTotal = (plan.loan.uses || []).reduce((s, u) => s + (Number(u.amount) || 0), 0);
-    if (Math.abs(usesTotal - plan.loan.amount) > 1) w.push(`סכום השימושים בכספים (${ils(usesTotal)}) שונה מסכום ההלוואה (${ils(plan.loan.amount)}).`);
+    const used = usesTotal(plan);
+    const src = sourcesTotal(plan);
+    if (Math.abs(used - src) > 1) w.push(`סכום השימושים בכספים (${ils(used)}) שונה ממקורות המימון (${ils(src)}).`);
     return w;
   }
 
@@ -265,24 +358,165 @@
     return Math.max(0, Number(plan && plan.startup && plan.startup.equity) || 0);
   }
 
+  // ---------- מקור אמת אחד לכל פריט ----------
+
+  const sumAmounts = (list) => (list || []).reduce((s, u) => s + (Number(u.amount) || 0), 0);
+  const hasContent = (u) => Boolean(String((u && u.item) || '').trim()) || Number(u && u.amount) > 0;
+
+  /** סך עלויות ההקמה שהמשתמש פירט בשלב "הקמת העסק" – מקור האמת להשקעה בעסק בהקמה */
+  function setupCostsTotal(plan) {
+    return sumAmounts(plan && plan.startup && plan.startup.setupCosts);
+  }
+
+  /** מקורות המימון: הלוואה ועוד הון עצמי (בעסק פועל אין הון עצמי, ולכן זה סכום ההלוואה) */
+  function sourcesTotal(plan) {
+    return Math.max(0, Number(plan && plan.loan && plan.loan.amount) || 0) + equityInflow(plan);
+  }
+
+  /** האם עלויות ההקמה הן מקור האמת לשימושים (עסק בהקמה שפירט עלויות) */
+  function setupDrivesUses(plan) {
+    return isNewBusiness(plan) && setupCostsTotal(plan) > 0;
+  }
+
+  /**
+   * השימושים בכספים – מקור אמת אחד.
+   * עסק בהקמה: הפריטים מטבלת עלויות ההקמה, ועוד הון חוזר שהוא כל מה שנשאר מהמקורות.
+   * כך כל פריט מוזן פעם אחת, וסך השימושים שווה תמיד לסך המקורות.
+   * עסק פועל: הרשימה שהמשתמש הזין בשלב ההלוואה, כמו קודם.
+   */
+  function planUses(plan) {
+    if (!setupDrivesUses(plan)) return ((plan && plan.loan && plan.loan.uses) || []).filter(hasContent);
+    const items = (plan.startup.setupCosts || []).filter(hasContent)
+      .map((u) => ({ item: u.item, amount: Number(u.amount) || 0, type: 'capex' }));
+    const working = sourcesTotal(plan) - setupCostsTotal(plan);
+    if (working > 0.5) items.push({ item: 'הון חוזר – סחורה, מלאי והוצאות שוטפות בתחילת הדרך', amount: working, type: 'working' });
+    return items;
+  }
+  function usesTotal(plan) { return sumAmounts(planUses(plan)); }
+
+  /** סך ההשקעה שיוצאת בחודש הראשון בתזרים: בעסק בהקמה – כל עלויות ההקמה */
+  function investmentTotal(plan) {
+    if (setupDrivesUses(plan)) return setupCostsTotal(plan);
+    return sumAmounts(((plan && plan.loan && plan.loan.uses) || []).filter((u) => u.type === 'capex'));
+  }
+
+  /** שם פריט להשוואה: בלי רווחים כפולים ובלי פיסוק בסוף */
+  function itemKey(name) {
+    return String(name || '').replace(/\s+/g, ' ').trim().replace(/[.:,;–-]+$/, '').toLowerCase();
+  }
+
+  /**
+   * שלוש בדיקות התקינות שחוסמות הפקת מסמך (דרישת מאיר, באג #3):
+   * sources – סך המקורות שווה לסך השימושים;
+   * invest – שורת ההשקעות בתזרים שווה לסך עלויות ההקמה;
+   * items – כל פריט מופיע באותו סכום בכל הטבלאות.
+   * הבדיקה נעשית על התוצר (שורות התזרים וטבלת השימושים שיודפסו), ולא על הקלט בלבד,
+   * כדי שגם טעות חישוב עתידית תיתפס ולא רק הזנה כפולה.
+   */
+  function integrityChecks(plan, res) {
+    const uses = (res && res.uses) || planUses(plan);
+    const cash = (res && res.cash) || [];
+    const src = sourcesTotal(plan);
+    const used = sumAmounts(uses);
+    const setup = setupCostsTotal(plan);
+    const expectedInvest = investmentTotal(plan);
+    // בלי שורות תזרים אין תוצר להשוות אליו, ולכן ההשוואה היא מול הקלט עצמו
+    const investInCash = cash.length ? cash.reduce((s, c) => s + (Number(c.invest) || 0), 0) : expectedInvest;
+    const checks = [];
+
+    checks.push({
+      code: 'sources',
+      label: 'סך מקורות המימון שווה לסך השימושים',
+      ok: Math.abs(src - used) <= 1,
+      message: used > src
+        ? `השימושים בכספים מסתכמים ב-${ils(used)}, אבל המקורות (הלוואה והון עצמי) מסתכמים ב-${ils(src)}. חסרים ${ils(used - src)}. אפשר להגדיל את ההון העצמי או את ההלוואה, או להקטין את עלויות ההקמה.`
+        : `המקורות (הלוואה והון עצמי) מסתכמים ב-${ils(src)}, אבל השימושים מסתכמים ב-${ils(used)}. יש לפרט על מה יוצאים ${ils(src - used)} שנותרו.`,
+    });
+    checks.push({
+      code: 'invest',
+      label: 'שורת ההשקעות בתזרים שווה לסך עלויות ההקמה',
+      ok: Math.abs(investInCash - expectedInvest) <= 1,
+      message: `שורת "השקעות" בטבלת התזרים מסתכמת ב-${ils(investInCash)}, אבל ${setup > 0 ? `סך עלויות ההקמה הוא ${ils(setup)}` : `סך ההשקעות בפירוט השימושים הוא ${ils(expectedInvest)}`}. שני המספרים חייבים להיות זהים.`,
+    });
+
+    const seen = new Map();
+    const clashes = [];
+    [...((plan && plan.startup && plan.startup.setupCosts) || []), ...uses].filter(hasContent).forEach((u) => {
+      const key = itemKey(u.item);
+      if (!key) return;
+      const amount = Number(u.amount) || 0;
+      if (!seen.has(key)) { seen.set(key, amount); return; }
+      if (Math.abs(seen.get(key) - amount) > 1 && !clashes.some((c) => c.key === key)) {
+        clashes.push({ key, item: String(u.item || '').trim(), a: seen.get(key), b: amount });
+      }
+    });
+    checks.push({
+      code: 'items',
+      label: 'כל פריט מופיע באותו סכום בכל הטבלאות',
+      ok: clashes.length === 0,
+      message: clashes.length
+        ? `הפריט "${clashes[0].item}" מופיע בשני סכומים שונים: ${ils(clashes[0].a)} ו-${ils(clashes[0].b)}. יש להזין אותו פעם אחת, בסכום אחד.`
+        : '',
+    });
+    return checks;
+  }
+  /** רק הבדיקות שנכשלו – אלה שחוסמות הפקת מסמך */
+  function integrityFailures(plan, res) {
+    return integrityChecks(plan, res).filter((c) => !c.ok);
+  }
+
+  /**
+   * המרווח בתזרים: היתרה המינימלית בפועל מול סף של הוצאה חודשית קבועה אחת
+   * (הוצאות קבועות ושכר). 'risk' – החשבון נכנס למינוס; 'warn' – נשאר חיובי אבל
+   * מתחת לסף; 'ok' – מעל הסף. במקום ההצהרה "התזרים יישאר חיובי" (באג #5).
+   */
+  function cashCushion(rows, f) {
+    const list = rows || [];
+    if (!list.length) return null;
+    const worst = list.reduce((a, c) => (c.closing < a.closing ? c : a));
+    const threshold = (Number(f && f.monthlyFixed) || 0) + (Number(f && f.monthlySalaries) || 0);
+    const level = worst.closing < 0 ? 'risk' : (threshold > 0 && worst.closing < threshold ? 'warn' : 'ok');
+    return { min: worst.closing, month: worst.month, threshold, level, monthsCovered: threshold > 0 ? worst.closing / threshold : null };
+  }
+
   /** חישוב מלא של תוכנית */
   function computePlan(plan) {
     const schedule = amortization(plan.loan.amount, plan.loan.ratePct, plan.loan.years, plan.loan.graceMonths);
-    const f = { ...plan.forecast, currentSales: (plan.history && plan.history.lastYearSales) || 0 };
+    const isNew = isNewBusiness(plan);
+    const f = {
+      ...plan.forecast,
+      currentSales: (plan.history && plan.history.lastYearSales) || 0,
+      entity: (plan.business && plan.business.entity) || 'osek',
+      // עסק בהקמה מתחיל בלי מזומן: הכסף שהבעלים מכניס נספר פעם אחת, כתקבול "הון עצמי" (באג #1)
+      openingCash: isNew ? 0 : (plan.forecast.openingCash || 0),
+    };
     const years = forecast(f, schedule);
-    const cash = cashflow(f, plan.loan.amount, plan.loan.uses, schedule, equityInflow(plan));
+    const uses = planUses(plan);
+    const cash = cashflow(f, plan.loan.amount, uses, schedule, equityInflow(plan), {
+      capex: investmentTotal(plan),
+      monthlyTax: years[0].tax / 12,
+    });
     const minDscr = Math.min(...years.map((y) => y.dscr));
     const firstFull = schedule.find((r) => r.principal > 0);
-    return {
+    const res = {
       cap: maxLoan(plan.forecast.annualSales),
-      schedule, years, cash,
+      schedule, years, cash, uses,
+      usesTotal: sumAmounts(uses),
+      sourcesTotal: sourcesTotal(plan),
+      setupTotal: setupCostsTotal(plan),
+      investment: investmentTotal(plan),
+      monthlyTax: years[0].tax / 12,
       monthlyPayment: firstFull ? firstFull.payment : 0,
       graceInterest: plan.loan.graceMonths > 0 ? schedule[0].payment : 0,
       totalInterest: schedule.reduce((s, r) => s + r.interest, 0),
       minDscr, rating: dscrLevel(minDscr),
       negativeMonths: cash.filter((c) => c.closing < 0).map((c) => c.month),
+      cushion: cashCushion(cash, f),
       warnings: validatePlan(plan),
     };
+    res.checks = integrityChecks(plan, res);
+    res.blocking = res.checks.filter((c) => !c.ok);
+    return res;
   }
 
   function ils(n) {
@@ -329,19 +563,52 @@
   }
 
   /**
-   * עסק בהקמה מזין את אותו מידע פעמיים: עלויות ההקמה ושימושי ההלוואה.
-   * כששימושי ההלוואה גדולים מעלות ההקמה שפורטה, המסמך מציג שני מספרים סותרים זה לצד זה.
-   * מחזיר טקסט הסבר, או null כשאין סתירה. לא נכנס ל-validatePlan, כי זו שאלת שלמות ולא שגיאה.
+   * הסבר בשלב ההזנה: מה ייעשה בכסף שנשאר מעל עלויות ההקמה שפורטו.
+   * לא שגיאה – בעסק בהקמה כל מה שלא הוגדר כעלות הקמה מוצג כהון חוזר, כדי שסך
+   * השימושים יישאר שווה לסך המקורות. מחזיר null כשאין עודף.
    */
-  function setupMismatch(plan) {
-    const sum = (list) => (list || []).reduce((s, u) => s + (Number(u.amount) || 0), 0);
-    const setup = sum(plan && plan.startup && plan.startup.setupCosts);
-    const uses = sum(plan && plan.loan && plan.loan.uses);
-    if (!(setup > 0) || !(uses > setup + 1)) return null;
-    return `פירטתם עלויות הקמה של ${ils(setup)}, אבל שימושי ההלוואה מסתכמים ב-${ils(uses)}. שני המספרים מופיעים באותו פרק במסמך, ולכן כדאי להשלים את עלויות ההקמה שחסרות בשלב "הקמת העסק", או להקטין את פירוט השימושים.`;
+  function workingCapitalNote(plan) {
+    const setup = setupCostsTotal(plan);
+    const src = sourcesTotal(plan);
+    if (!isNewBusiness(plan) || !(setup > 0) || !(src > setup + 1)) return null;
+    return `פירטתם עלויות הקמה של ${ils(setup)}, ומקורות המימון (ההלוואה וההון העצמי) הם ${ils(src)}. ההפרש, ${ils(src - setup)}, יוצג בתוכנית כהון חוזר – כסף לסחורה, למלאי ולהוצאות השוטפות בתחילת הדרך.`;
   }
 
-  const api = { FUND, TRACKS, AFFORD, maxLoan, spitzerPayment, amortization, debtByYear, rampFactor, salesLevel, forecast, cashflow, dscrLevel, affordLevel, loanForPayment, roundAmount, repaymentOptions, equityShare, validatePlan, isNewBusiness, equityInflow, computePlan, ils, parseAmount, moneyText, profitText, negativeMonthsText, setupMismatch };
+  /** סך ההון החוזר שבטבלת השימושים – הכסף שנשאר בחשבון אחרי ההשקעות */
+  function workingCapitalTotal(plan) {
+    return sumAmounts(planUses(plan).filter((u) => u.type === 'working'));
+  }
+
+  /**
+   * ניסוח הגישור על חודשי המינוס, בפרק הסיכונים שבמסמך.
+   * עסק פועל – יש לו מסגרת אשראי קיימת, וזו הצהרה נכונה.
+   * עסק בהקמה – אין לו מסגרת אשראי, ולא שאלנו אותו על כך; אסור להצהיר לבנק על
+   * עובדה שלא קיימת (ממצא QA סבב 4, באג לא-חוסם 1). מפנים להון החוזר שכבר במסמך.
+   */
+  function bridgeText(isNew, workingCapital) {
+    if (!isNew) return 'העסק יגשר על כך באמצעות מסגרת אשראי קיימת או דחיית חלק מההשקעות.';
+    const wc = Number(workingCapital) || 0;
+    return wc > 0.5
+      ? `הגישור ייעשה מתוך ההון החוזר שבמקורות ובשימושים (${ils(wc)}), ובמידת הצורך גם בדחיית חלק מההשקעות, בהוספת חודשי גרייס או בהגדלת ההון העצמי.`
+      : 'הגישור ייעשה בדחיית חלק מההשקעות, בהוספת חודשי גרייס או בהגדלת ההון העצמי לפני הפתיחה.';
+  }
+
+  /**
+   * ניסוח המרווח הדק בפרק הסיכונים שבמסמך – מה העסק יעשה כשהיתרה הנמוכה ביותר
+   * קטנה מחודש הוצאות, אבל התזרים עדיין לא נכנס למינוס.
+   * עסק פועל – יש לו חשבון פעיל ומסגרת אשראי, וזו הצהרה נכונה.
+   * עסק בהקמה – אין לו מסגרת אשראי ולא שאלנו אותו עליה; מפנים להון החוזר האמיתי
+   * שכבר מוצג במקורות ובשימושים. אותה משפחת ממצאים של bridgeText (QA סבב 4).
+   */
+  function thinCushionText(isNew, workingCapital) {
+    if (!isNew) return 'העסק ישמור על מסגרת אשראי זמינה ויתאים את קצב ההשקעות לתקבולים בפועל.';
+    const wc = Number(workingCapital) || 0;
+    return wc > 0.5
+      ? `ההון החוזר שבמקורות ובשימושים (${ils(wc)}) נועד בדיוק לחודשים האלה, והעסק יתאים את קצב ההשקעות לתקבולים בפועל.`
+      : 'העסק יתאים את קצב ההשקעות לתקבולים בפועל, ובמידת הצורך יוסיף חודשי גרייס או הון עצמי לפני הפתיחה.';
+  }
+
+  const api = { FUND, TRACKS, AFFORD, TAX, maxLoan, spitzerPayment, amortization, debtByYear, rampFactor, salesLevel, bracketTax, nationalInsurance, taxFor, forecast, cashflow, dscrLevel, affordLevel, loanForPayment, roundAmount, repaymentOptions, equityShare, validatePlan, isNewBusiness, equityInflow, setupCostsTotal, sourcesTotal, planUses, usesTotal, investmentTotal, integrityChecks, integrityFailures, cashCushion, computePlan, ils, parseAmount, moneyText, profitText, negativeMonthsText, workingCapitalNote, workingCapitalTotal, bridgeText, thinCushionText };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Engine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

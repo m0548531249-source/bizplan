@@ -29,7 +29,7 @@
       advantage: 'מוצרים טריים שנאפים באותו יום, כשרות מהודרת, ומשלוחים עד הבית בערבי שבת.' },
     history: { lastYearSales: 1150000, lastYearProfit: 160000 },
     startup: { openDate: '', equity: 0, setupCosts: [{ item: '', amount: 0 }] },
-    forecast: { annualSales: 1600000, rampMonths: 2, growthPct: 8, cogsPct: 38, monthlyFixed: 20000, monthlySalaries: 30000, ownerDrawMonthly: 12000, taxRatePct: 20, openingCash: 40000 },
+    forecast: { annualSales: 1600000, rampMonths: 2, growthPct: 8, cogsPct: 38, monthlyFixed: 20000, monthlySalaries: 30000, ownerDrawMonthly: 12000, openingCash: 40000 },
     loan: { track: 'general', amount: 300000, ratePct: 7.5, years: 5, graceMonths: 6,
       purpose: 'רכישת תנור מסחרי שני ומקרר תעשייתי, כדי להגדיל את כושר הייצור ב-40% ולעמוד בהזמנות מהמכולות.',
       uses: [{ item: 'תנור מסחרי', amount: 180000, type: 'capex' }, { item: 'מקרר תעשייתי', amount: 45000, type: 'capex' }, { item: 'הון חוזר (חומרי גלם ומלאי)', amount: 75000, type: 'working' }] },
@@ -42,7 +42,7 @@
     market: { customers: '', competitors: '', advantage: '' },
     history: { lastYearSales: 0, lastYearProfit: 0 },
     startup: { openDate: '', equity: 0, setupCosts: [{ item: '', amount: 0 }] },
-    forecast: { annualSales: 0, rampMonths: 0, growthPct: 5, cogsPct: 30, monthlyFixed: 0, monthlySalaries: 0, ownerDrawMonthly: 0, taxRatePct: 20, openingCash: 0 },
+    forecast: { annualSales: 0, rampMonths: 0, growthPct: 5, cogsPct: 30, monthlyFixed: 0, monthlySalaries: 0, ownerDrawMonthly: 0, openingCash: 0 },
     loan: { track: 'general', amount: 0, ratePct: 7.5, years: 5, graceMonths: 0, purpose: '', uses: [{ item: '', amount: 0, type: 'capex' }] },
   };
   const ENTITIES = { osek: 'עוסק מורשה', company: 'חברה בע"מ', partnership: 'שותפות' };
@@ -104,15 +104,22 @@
       { k: 'forecast.monthlySalaries', label: 'שכר עובדים בחודש', type: 'money', hint: 'עלות כוללת למעסיק. בלי עובדים: 0' },
       { k: 'forecast.ownerDrawMonthly', label: 'כמה אתם לוקחים הביתה בחודש?', type: 'money', hint: 'הבנק רוצה לראות שגם אתם מתפרנסים' },
       { k: 'forecast.openingCash', label: 'כמה כסף יש היום בחשבון העסק?', type: 'money', onlyExisting: 1 },
-      { k: 'forecast.openingCash', label: 'כמה כסף יהיה בחשבון ביום הפתיחה?', type: 'money', onlyNew: 1, hint: 'המזומן שתתחילו איתו, לפני ההלוואה' },
-      { k: 'forecast.taxRatePct', label: 'שיעור המס שלכם', type: 'chips', wide: 1, opts: { 10: '10%', 20: '20%', 23: '23% (חברה)', 31: '31%' }, hint: 'לא בטוחים? השאירו 20%' },
+      // בעסק בהקמה אין "כסף בחשבון" לפני הפתיחה: הכסף שהבעלים מכניס נשאל פעם אחת,
+      // כ"הון עצמי" בשלב "הקמת העסק", והוא נכנס לתזרים כתקבול בחודש 1 (באג #1).
+      { k: 'forecast.openingCash', label: 'מזומן פתיחה', type: 'static', onlyNew: 1, value: () => 'ההון העצמי שהזנתם בשלב "הקמת העסק"',
+        hint: 'בעסק שעוד לא נפתח, הכסף שאתם מכניסים נספר פעם אחת בלבד – כתקבול "הכנסת הון עצמי" בחודש הראשון בתזרים.' },
+      { k: 'business.entity', label: 'איך מחושב המס', type: 'static', wide: 1, value: () => taxMethodText(plan.business.entity),
+        hint: 'המס נגזר מצורת העסק שבחרתם ומגובה הרווח, ולא משיעור אחיד. זו הערכה בלבד – יש לאמת אותה מול רואה חשבון.' },
     ] },
     { name: 'ההלוואה', kicker: 'ההלוואה', title: 'כמה אתם צריכים, ולמה?', intro: 'כאן רואים מיד כמה תחזירו בחודש, והאם העסק עומד בזה.', fields: [
       { k: 'loan.amount', label: 'סכום ההלוואה', type: 'money', req: 1 },
       { k: 'loan.track', label: 'מסלול בקרן', type: 'chips', opts: E.TRACKS, hint: 'עסק שפועל פחות משנה: "עסקים בהקמה"', onlyExisting: 1 },
       { k: 'loan.track', label: 'מסלול בקרן', type: 'static', onlyNew: 1, value: () => E.TRACKS.startup, hint: 'נבחר אוטומטית, כי אמרתם שהעסק עוד לא נפתח' },
       { k: 'loan.purpose', label: 'מה תעשו עם הכסף, ואיך זה יגדיל את ההכנסות?', type: 'textarea', req: 1, wide: 1, ph: 'למשל: רכישת תנור שני כדי להגדיל את הייצור ב-40%' },
-      { k: 'loan.uses', label: 'פירוט: על מה בדיוק יוצא הכסף', type: 'uses', wide: 1 },
+      { k: 'loan.uses', label: 'פירוט: על מה בדיוק יוצא הכסף', type: 'uses', wide: 1, onlyExisting: 1 },
+      // עסק בהקמה כבר פירט את עלויות ההקמה בשלב 3. במקום להזין אותן שוב (וליצור שני
+      // מספרים סותרים לאותו פריט) הטבלה כאן נגזרת מהן – מקור אמת אחד (באג #3).
+      { k: 'loan.uses', label: 'על מה יוצא הכסף', type: 'sources', wide: 1, onlyNew: 1 },
       { k: 'loan.years', label: 'לכמה שנים?', type: 'chips', opts: { 3: '3 שנים', 4: '4 שנים', 5: '5 שנים' } },
       { k: 'loan.graceMonths', label: 'חודשים ראשונים עם ריבית בלבד (גרייס)', type: 'chips', opts: { 0: 'בלי', 3: '3 חודשים', 6: '6 חודשים' }, hint: 'נותן לעסק זמן להתחיל להרוויח מההשקעה' },
       { k: 'loan.ratePct', label: 'ריבית שנתית משוערת', type: 'pct', hint: 'הבנק קובע. להערכה: פריים ועוד 1%–2%, בערך 7.5%' },
@@ -142,7 +149,17 @@
     if (out.business.isNew == null && String(out.business.name || '').trim()) out.business.isNew = !out.business.years;
     if (!Array.isArray(out.loan.uses) || !out.loan.uses.length) out.loan.uses = clone(EMPTY.loan.uses);
     if (!Array.isArray(out.startup.setupCosts) || !out.startup.setupCosts.length) out.startup.setupCosts = clone(EMPTY.startup.setupCosts);
+    // עסק בהקמה: המזומן ההתחלתי הוא ההון העצמי בלבד. תוכנית שנשמרה לפני התיקון
+    // עשויה להחזיק את אותו סכום בשני השדות, ואז הוא נספר פעמיים בתזרים (באג #1).
+    if (out.business.isNew === true) out.forecast.openingCash = 0;
     return out;
+  }
+
+  /** איך מחושב המס, לפי צורת ההתאגדות – לתצוגה באשף ובמסמך */
+  function taxMethodText(entity) {
+    if (entity === 'company') return `מס חברות של ${num(E.TAX.companyRatePct)}% על הרווח`;
+    if (entity === 'partnership') return 'מדרגות מס הכנסה וביטוח לאומי לפי גובה הרווח (בחישוב של שותף אחד)';
+    return 'מדרגות מס הכנסה וביטוח לאומי לפי גובה הרווח';
   }
 
   /** השלבים בפועל: אותם 6 שלבים, אבל שלב "הכנסות" מוחלף ב"הקמת העסק" לעסק חדש */
@@ -211,6 +228,7 @@
     const bad = showErrors && f.req && isMissing(f);
     let input;
     if (f.type === 'uses') return usesHtml(f);
+    if (f.type === 'sources') return sourcesBoxHtml(f);
     if (f.type === 'choice') {
       input = `<div class="choice-cards" role="group" aria-labelledby="${id}-l">${f.opts.map((o) =>
         `<button type="button" class="choice" data-choice="${String(o.val)}" aria-pressed="${v === o.val}"><b>${esc(o.title)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>`;
@@ -256,6 +274,34 @@
       <div class="uses-foot"><button type="button" class="btn-text" data-add="${key}">+ הוספת פריט</button><span data-total="${key}">${usesTotalHtml(key)}</span></div>
       ${bad ? '<span class="err">לכל פריט עם סכום צריך לכתוב על מה הוא</span>' : `<span class="hint">${esc(hint)}</span>`}</div>`;
   }
+  /**
+   * עסק בהקמה: השימושים בכספים נגזרים מעלויות ההקמה שהוזנו פעם אחת בשלב 3,
+   * ועוד הון חוזר שהוא כל מה שנשאר מהמקורות. לכן אין כאן שדות להזנה – רק הצגה
+   * ובדיקה שהמקורות מכסים את השימושים (באג #3).
+   */
+  function sourcesBoxHtml(f) {
+    const items = E.planUses(plan);
+    const setup = E.setupCostsTotal(plan);
+    const src = E.sourcesTotal(plan);
+    const used = E.usesTotal(plan);
+    if (!(setup > 0)) {
+      return `<div class="field wide" id="sources-box"><label>${esc(f.label)}</label>
+        <span class="hint">כאן יופיע פירוט השימושים, מתוך עלויות ההקמה שתזינו בשלב "${steps()[2].name}". כך כל פריט מוזן פעם אחת בלבד.
+        <button type="button" class="btn-text" data-go="2">למילוי עלויות ההקמה</button></span></div>`;
+    }
+    const rows = items.map((u) => `<tr><th scope="row">${esc(u.item)}</th><td>${ils(u.amount)}</td></tr>`).join('');
+    const short = used - src;
+    const status = short > 1
+      ? `<p class="warn-text">עלויות ההקמה (${ils(setup)}) גבוהות ממקורות המימון (${ils(src)}) ב-${ils(short)}. אפשר להגדיל את ההלוואה או את ההון העצמי, או להקטין את עלויות ההקמה. בלי זה לא נוכל להפיק את התוכנית.</p>`
+      : `<p class="ok-text">✓ מקורות המימון (הלוואה ${ils(plan.loan.amount)} והון עצמי ${ils(E.equityInflow(plan))}) שווים בדיוק לסך השימושים: ${ils(src)}.</p>`;
+    return `<div class="field wide" id="sources-box"><label>${esc(f.label)}</label>
+      <div class="tbl-wrap"><table><thead><tr><th>שימוש</th><th>סכום</th></tr></thead><tbody>${rows}
+        <tr class="total"><th scope="row">סה"כ שימושים</th><td>${ils(used)}</td></tr></tbody></table></div>
+      ${status}
+      <span class="hint">הפריטים נלקחים מעלויות ההקמה שהזנתם, כדי שלא יופיעו שני סכומים שונים לאותו פריט.
+      <button type="button" class="btn-text" data-go="2">לעריכת עלויות ההקמה</button></span></div>`;
+  }
+
   function usesTotal(key) { return (get(plan, key) || []).reduce((s, u) => s + (Number(u.amount) || 0), 0); }
   function usesTotalHtml(key = 'loan.uses') {
     const total = usesTotal(key);
@@ -393,20 +439,60 @@
       return;
     }
     const res = E.computePlan(plan);
+    // שלוש בדיקות התקינות חוסמות הפקת מסמך: כשהמספרים לא מתיישבים, אין מסמך (באג #3)
+    if (res.blocking.length) {
+      $('step-title').textContent = 'המספרים לא מתיישבים';
+      $('step-intro').textContent = 'לא נפיק מסמך שבו אותו כסף מופיע בשני סכומים שונים. אחרי התיקון הכפתור יחזור:';
+      $('form').innerHTML = `<ul class="fixes blocking">${res.blocking.map((c) =>
+        `<li><b>${esc(c.label)}</b><br>${esc(c.message)} <button type="button" class="btn-text" data-go="${blockingStep(c.code)}">לתיקון</button></li>`).join('')}</ul>`;
+      $('next').hidden = true;
+      return;
+    }
     const fixes = [...res.warnings];
     if (res.negativeMonths.length) fixes.push(`${E.negativeMonthsText(res.negativeMonths)} יהיה מינוס בחשבון. אפשר להוסיף גרייס, לדחות חלק מההשקעות או להתחיל עם יותר מזומן.`);
-    // עסק בהקמה: עלויות ההקמה ושימושי ההלוואה נשאלים בנפרד, וסתירה ביניהם נראית במסמך
-    if (isNewBiz()) { const mismatch = E.setupMismatch(plan); if (mismatch) fixes.push(mismatch); }
+    else if (res.cushion && res.cushion.level === 'warn') fixes.push(cushionText(res, 'wizard', plan));
+    const wc = E.workingCapitalNote(plan);
+    if (wc) fixes.push(wc);
     $('step-title').textContent = `התוכנית של ${plan.business.name} מוכנה`;
     $('step-intro').textContent = 'ככה הבקשה נראית במספרים. אפשר לחזור לכל שלב ולשנות.';
     $('form').innerHTML = snapshotHtml() + (fixes.length ? `<h2 style="font-family:var(--serif);font-size:22px;margin:28px 0 0">כדאי לטפל לפני ההגשה</h2><ul class="fixes">${fixes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
     $('next').hidden = false;
   }
 
+  /** לאיזה שלב לשלוח את המשתמש כדי לתקן בדיקת תקינות שנכשלה */
+  function blockingStep(code) {
+    if (code === 'items') return 2;
+    return isNewBiz() ? 2 : 4;
+  }
+
+  /**
+   * המרווח בתזרים – משפט שנגזר מהיתרה המינימלית בפועל מול סף של חודש הוצאות
+   * קבועות ושכר, ולא מהצהרה קבועה "התזרים יישאר חיובי" (באג #5).
+   * ניסוח המענה בענף האזהרה שבמסמך נגזר מסוג העסק (E.thinCushionText), כדי שלא
+   * נצהיר לבנק על אשראי בנקאי שאין לעסק שעוד לא נפתח.
+   */
+  function cushionText(res, where, p) {
+    const c = res.cushion;
+    if (!c) return '';
+    const min = `${ils(Math.max(0, c.min))} בחודש ${c.month}`;
+    if (c.level === 'warn') {
+      const base = `היתרה הנמוכה ביותר בתזרים היא ${min} – פחות מחודש אחד של הוצאות קבועות ושכר (${ils(c.threshold)}).`;
+      return where === 'wizard'
+        ? `${base} התזרים לא נכנס למינוס, אבל המרווח דק: עיכוב בתקבולים או הוצאה לא מתוכננת יכניסו את החשבון למינוס. כדאי להתחיל עם יותר מזומן, להוסיף גרייס או לדחות חלק מההשקעות.`
+        : `${base} התזרים אינו נכנס למינוס בתחזית, אך המרווח דק; ${E.thinCushionText(isNewBiz(p), E.workingCapitalTotal(p || plan))}`;
+    }
+    return `היתרה הנמוכה ביותר בתזרים היא ${min}, יותר מחודש אחד של הוצאות קבועות ושכר (${ils(c.threshold)}). התזרים החודשי צפוי להישאר חיובי לאורך כל השנה הראשונה.`;
+  }
+
   function go(i) { step = Math.max(0, Math.min(steps().length - 1, i)); showErrors = false; renderStep(); window.scrollTo(0, 0); }
 
   function next() {
-    if (step === steps().length - 1) { viewingSample = false; renderDocument(plan); show('doc'); return; }
+    if (step === steps().length - 1) {
+      // שער אחרון: בדיקות התקינות חוסמות הפקת מסמך, גם אם המשתמש הגיע לכאן עם דף פתוח
+      const blocking = E.computePlan(plan).blocking;
+      if (blocking.length) { toast('המספרים בתוכנית לא מתיישבים. יש לתקן לפני הפקת המסמך.'); renderSummary(); return; }
+      viewingSample = false; renderDocument(plan); show('doc'); return;
+    }
     const errs = stepErrors(step);
     if (errs.length) {
       showErrors = true; renderStep();
@@ -421,6 +507,8 @@
   function refreshLive() {
     if (step === 4) {
       const snap = $('snapshot'); if (snap) snap.outerHTML = snapshotHtml();
+      const box = $('sources-box');
+      if (box) { const f = steps()[4].fields.find((x) => x.type === 'sources'); if (f) box.outerHTML = sourcesBoxHtml(f); }
     }
     if (step === 2 && isNewBiz()) {
       const box = $('goodtoknow'); if (box) box.outerHTML = goodToKnowHtml();
@@ -431,6 +519,11 @@
   // ---------- מסמך ----------
   function table(head, rows, cls = '') {
     return `<div class="tbl-wrap"><table class="${cls}"><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr${r.cls ? ` class="${r.cls}"` : ''}>${r.cells.map((c, i) => `<${i === 0 ? 'th scope="row"' : 'td'}>${c}</${i === 0 ? 'th' : 'td'}>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+
+  /** שם שורת המס בתזרים, לפי צורת ההתאגדות */
+  function taxCashRowLabel(entity) {
+    return entity === 'company' ? 'מס חברות' : 'מס הכנסה וביטוח לאומי';
   }
 
   function renderDocument(p) {
@@ -450,7 +543,11 @@
       { cells: ['רווח תפעולי (לפני פחת)', ...y.map((r) => ils(r.ebitda))], cls: 'sub' },
       { cells: ['הוצאות מימון (ריבית)', ...y.map((r) => ils(r.interest))] },
       { cells: ['רווח לפני מס', ...y.map((r) => ils(r.preTax))] },
-      { cells: ['מס משוער', ...y.map((r) => ils(r.tax))] },
+      // המס מפורק לשורות אמיתיות: עוסק מורשה משלם מס הכנסה וגם ביטוח לאומי (באג #4)
+      ...(b.entity === 'company'
+        ? [{ cells: ['מס חברות משוער', ...y.map((r) => ils(r.tax))] }]
+        : [{ cells: ['מס הכנסה משוער', ...y.map((r) => ils(r.incomeTax))] },
+          { cells: ['ביטוח לאומי משוער', ...y.map((r) => ils(r.ni))] }]),
       { cells: ['רווח נקי', ...y.map((r) => ils(r.net))], cls: 'total' },
     ]);
     // שורת ההון העצמי מוצגת רק כשיש כזה, כדי שהתזרים יתיישב עם "סך ההשקעה" בפרק 5
@@ -465,6 +562,8 @@
       { cells: ['עלות המכר', ...res.cash.map((c) => num(c.cogs))] },
       { cells: ['הוצאות קבועות ושכר', ...res.cash.map((c) => num(c.fixed + c.salaries))] },
       { cells: ['משיכת בעלים', ...res.cash.map((c) => num(c.draw))] },
+      // תשלומי המס יוצאים גם מהתזרים, ולא רק מחישוב יכולת ההחזר שבפרק 9
+      { cells: [taxCashRowLabel(b.entity), ...res.cash.map((c) => num(c.tax))] },
       { cells: ['החזר הלוואה', ...res.cash.map((c) => num(c.debt))] },
       { cells: ['השקעות', ...res.cash.map((c) => (c.invest ? num(c.invest) : '–'))] },
       { cells: ['יתרת סגירה', ...res.cash.map((c) => `<span class="${c.closing < 0 ? 'neg' : ''}">${num(c.closing)}</span>`)], cls: 'total' },
@@ -475,37 +574,29 @@
     })));
     const dscr = table(['', 'שנה 1', 'שנה 2', 'שנה 3'], [
       { cells: ['רווח תפעולי', ...y.map((r) => ils(r.ebitda))] },
-      { cells: ['פחות מס ומשיכת בעלים', ...y.map((r) => ils(r.tax + r.ownerDraw))] },
+      { cells: [b.entity === 'company' ? 'פחות מס חברות ומשיכת בעלים' : 'פחות מס, ביטוח לאומי ומשיכת בעלים', ...y.map((r) => ils(r.tax + r.ownerDraw))] },
       { cells: ['מזומן פנוי להחזר', ...y.map((r) => ils(r.cfads))], cls: 'sub' },
       { cells: ['החזרי הלוואה בשנה', ...y.map((r) => ils(r.debtService))] },
       { cells: ['יחס כיסוי חוב (DSCR)', ...y.map((r) => (Number.isFinite(r.dscr) ? num(r.dscr, 2) : '—'))], cls: 'total' },
     ]);
-    const usesTotalSum = p.loan.uses.reduce((s, u) => s + (Number(u.amount) || 0), 0);
+    // מקור אמת אחד: טבלת השימושים נגזרת מהמנוע (בעסק בהקמה – מעלויות ההקמה) ולא מרשימה
+    // נפרדת שהוזנה שוב בשלב ההלוואה, כדי שלא יופיעו שני סכומים לאותו פריט (באג #3)
+    const usesTotalSum = res.usesTotal;
     const uses = table(['פריט', 'סוג', 'סכום'], [
-      ...p.loan.uses.filter((u) => u.item || u.amount).map((u) => ({ cells: [esc(u.item), u.type === 'capex' ? 'השקעה' : 'הון חוזר', ils(u.amount)] })),
+      ...res.uses.map((u) => ({ cells: [esc(u.item), u.type === 'capex' ? 'השקעה' : 'הון חוזר', ils(u.amount)] })),
       { cells: ['סה"כ', '', ils(usesTotalSum)], cls: 'total' },
     ]);
-    // עסק בהקמה: מקורות המימון (הלוואה + הון עצמי) ועלות ההקמה המלאה, לא רק שימושי ההלוואה
-    const setupList = (st.setupCosts || []).filter((u) => u.item || u.amount);
-    const setupTotal = setupList.reduce((s, u) => s + (Number(u.amount) || 0), 0);
+    const setupTotal = res.setupTotal;
     const sources = table(['מקור המימון', 'סכום', 'חלק מסך ההשקעה'], [
       { cells: ['הלוואה מהקרן', ils(p.loan.amount), share ? `${num(100 - share.pct, 0)}%` : '—'] },
       { cells: ['הון עצמי של הבעלים', ils(equity), share ? `${num(share.pct, 0)}%` : '—'] },
-      { cells: ['סה"כ השקעה', ils(share ? share.total : p.loan.amount + equity), '100%'], cls: 'total' },
+      { cells: ['סה"כ מקורות', ils(share ? share.total : p.loan.amount + equity), '100%'], cls: 'total' },
     ]);
-    const setupTable = setupList.length ? table(['עלות הקמה', 'סכום'], [
-      ...setupList.map((u) => ({ cells: [esc(u.item), ils(u.amount)] })),
-      { cells: ['סה"כ עלויות ההקמה', ils(setupTotal)], cls: 'total' },
-    ]) : '';
-    // כשהפירוט לא מכסה את שימושי ההלוואה, המסמך לא יכול להצהיר שהטבלה כוללת הכול – הוא מיישב את הפער במקום
-    const setupPartial = isNew && !!E.setupMismatch(p);
-    const setupHeading = setupPartial ? 'פירוט עלויות ההקמה' : 'עלות ההקמה המלאה';
-    const setupNote = setupPartial
-      ? `עלויות ההקמה שפורטו (${ils(setupTotal)}) נמוכות משימושי ההלוואה (${ils(usesTotalSum)}). ההפרש, ${ils(usesTotalSum - setupTotal)}, כלול בשימושי ההלוואה שלמעלה ואינו מפורט בטבלה הזו.`
-      : 'הטבלה כוללת את כל עלויות ההקמה, גם את אלה שאינן ממומנות מההלוואה.';
+    // טבלת ההתאמה: מקורות מול שימושים, שניהם באותו סכום, במקום הערה על הפרש שלא פורט
+    const reconcile = `סך המקורות (${ils(res.sourcesTotal)}) שווה לסך השימושים (${ils(usesTotalSum)}). מתוכם ${ils(setupTotal)} עלויות הקמה חד-פעמיות, שיוצאות בחודש הראשון בתזרים שבפרק 7, והיתר הון חוזר שנשאר בחשבון העסק.`;
     const n = p.loan.years * 12 - p.loan.graceMonths;
     const risks = [
-      res.negativeMonths.length ? `בתזרים צפויה יתרה שלילית ${E.negativeMonthsText(res.negativeMonths)}. העסק יגשר על כך באמצעות מסגרת אשראי קיימת או דחיית חלק מההשקעות.` : 'התזרים החודשי צפוי להישאר חיובי לאורך כל השנה הראשונה.',
+      res.negativeMonths.length ? `בתזרים צפויה יתרה שלילית ${E.negativeMonthsText(res.negativeMonths)}, והיתרה הנמוכה ביותר היא ${ils(res.cushion.min)} בחודש ${res.cushion.month}. ${E.bridgeText(isNew, E.workingCapitalTotal(p))}` : cushionText(res, 'doc', p),
       `רגישות למכירות: ירידה של 10% במכירות תקטין את הרווח התפעולי בשנה הראשונה בכ-${ils(y[0].revenue * 0.1 * (1 - p.forecast.cogsPct / 100))}.`,
       `ריבית: התחזית מניחה ריבית שנתית של ${num(p.loan.ratePct, 1)}%. עלייה של 1% בריבית תגדיל את ההחזר החודשי בכ-${ils(E.spitzerPayment(p.loan.amount, p.loan.ratePct + 1, n) - E.spitzerPayment(p.loan.amount, p.loan.ratePct, n))}.`,
     ];
@@ -541,12 +632,14 @@
         ${p.market.competitors ? `<h3>מתחרים</h3><p>${esc(p.market.competitors)}</p>` : ''}
         <h3>היתרון התחרותי</h3><p>${esc(p.market.advantage)}</p></section>
       <section><h2>5. ${isNew ? 'מקורות ושימושים' : 'מטרת ההלוואה והשימוש בכספים'}</h2><p>${esc(p.loan.purpose)}</p>
-        ${isNew ? `<h3>מקורות המימון</h3>${sources}${share && equity > 0 ? `<p class="note">ההון העצמי מהווה כ-${num(share.pct, 0)}% מסך ההשקעה. הוא אינו חלק משימושי ההלוואה שבטבלה הבאה; הוא נכנס לעסק בחודש הראשון ומוצג כתקבול בתזרים שבפרק 7.</p>` : ''}<h3>שימוש בכספי ההלוואה</h3>` : ''}${uses}
-        ${isNew && setupTable ? `<h3>${setupHeading}</h3>${setupTable}<p class="note">${esc(setupNote)}</p>` : ''}</section>
+        ${isNew ? `<h3>מקורות המימון</h3>${sources}<h3>השימוש בכספים</h3>` : ''}${uses}
+        ${isNew ? `<p class="note">${esc(reconcile)}</p>${share && equity > 0 ? `<p class="note">ההון העצמי מהווה כ-${num(share.pct, 0)}% מסך המקורות. הוא נכנס לעסק בחודש הראשון ומוצג כתקבול בתזרים שבפרק 7. כל פריט בטבלה מוזן פעם אחת, וכל הטבלאות במסמך נגזרות ממנו.</p>` : ''}` : ''}</section>
       <section><h2>6. תחזית רווח והפסד ל-3 שנים</h2>
-        <p class="note">הנחות: מחזור שנתי בקצב מלא של ${ils(p.forecast.annualSales)}${p.forecast.rampMonths ? `, שמושג בהדרגה בתוך ${p.forecast.rampMonths} חודשים${isNew ? ' מיום הפתיחה, מאפס מכירות' : ''}` : ''}; צמיחה של ${num(p.forecast.growthPct, 1)}% בשנה; עלות מכר (הסחורה וחומרי הגלם שנכנסים למכירה) של ${num(p.forecast.cogsPct, 1)}%; עדכון הוצאות קבועות ושכר ב-3% בשנה; מס משוער של ${num(p.forecast.taxRatePct, 1)}%.</p>
+        <p class="note">הנחות: מחזור שנתי בקצב מלא של ${ils(p.forecast.annualSales)}${p.forecast.rampMonths ? `, שמושג בהדרגה בתוך ${p.forecast.rampMonths} חודשים${isNew ? ' מיום הפתיחה, מאפס מכירות' : ''}` : ''}; צמיחה של ${num(p.forecast.growthPct, 1)}% בשנה; עלות מכר (הסחורה וחומרי הגלם שנכנסים למכירה) של ${num(p.forecast.cogsPct, 1)}%; עדכון הוצאות קבועות ושכר ב-3% בשנה.</p>
+        <p class="note">המס מחושב לפי צורת ההתאגדות (${esc(ENTITIES[b.entity])}): ${esc(taxMethodText(b.entity))}. בשנה הראשונה, על רווח של ${ils(y[0].preTax)}, ההערכה היא ${ils(y[0].tax)} – כ-${num(y[0].taxEffectivePct, 1)}% מהרווח. ${esc(E.TAX.note)}</p>
         ${isNew ? '<p class="note">העסק טרם נפתח; ההנחות בתחזית מבוססות על תוכנית העסק ועל ניסיון הבעלים, ולא על נתונים היסטוריים – רמת אי-הוודאות גבוהה יותר מאשר בעסק פעיל.</p>' : ''}${pl}</section>
-      <section class="page-break"><h2>7. תזרים מזומנים חודשי – שנה ראשונה (₪)</h2>${cf}</section>
+      <section class="page-break"><h2>7. תזרים מזומנים חודשי – שנה ראשונה (₪)</h2>${cf}
+        <p class="note">שורת "${esc(taxCashRowLabel(b.entity))}" היא הערכה חודשית: 1/12 מהמס השנתי המשוער של השנה הראשונה (${ils(res.years[0].tax)}). בפועל המס משולם במקדמות לפי מועדי רשות המסים, ולכן הפיזור בין החודשים עשוי להיות שונה. שורת "השקעות" היא ${isNew ? 'סך עלויות ההקמה' : 'סך פריטי ההשקעה (רכש ציוד ונכסים)'} שבפרק 5 (${ils(res.investment)}).</p></section>
       <section><h2>8. ההלוואה ולוח הסילוקין</h2>
         <p>הלוואה של ${ils(p.loan.amount)} בריבית שנתית משוערת של ${num(p.loan.ratePct, 1)}%, בשיטת שפיצר, ל-${p.loan.years * 12} חודשים${p.loan.graceMonths ? `, מתוכם ${p.loan.graceMonths} חודשי גרייס (ריבית בלבד, ${ils(res.graceInterest)} בחודש)` : ''}. ההחזר החודשי: <strong>${ils(res.monthlyPayment)}</strong>. סך הריבית לכל התקופה: ${ils(res.totalInterest)}.</p>${am}</section>
       <section><h2>9. יכולת החזר וסיכונים</h2>${dscr}
@@ -663,6 +756,8 @@ body{padding:24px 16px} .print-bar{max-width:840px;margin:0 auto 16px;display:fl
       plan.loan.track = isNew ? 'startup' : 'general';
       if (isNew) {
         plan.business.years = 0; plan.history.lastYearSales = 0; plan.history.lastYearProfit = 0;
+        // אין "כסף בחשבון" לפני הפתיחה – ההון העצמי הוא המזומן ההתחלתי, ונשאל פעם אחת
+        plan.forecast.openingCash = 0;
         // ברירת מחדל סבירה לעסק שמתחיל מאפס לקוחות; המשתמש יכול לשנות
         if (!plan.forecast.rampMonths) plan.forecast.rampMonths = 3;
       }

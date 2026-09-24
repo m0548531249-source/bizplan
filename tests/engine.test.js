@@ -78,12 +78,13 @@ test('computePlan: עסק קיים עם תקופת הרצה לא נראה חלש
 test('תחזית: רווח תפעולי, ריבית, מס ו-DSCR מחושבים נכון בשנה 1', () => {
   const p = basePlan();
   const s = E.amortization(p.loan.amount, p.loan.ratePct, p.loan.years, 0);
-  const [y1] = E.forecast(p.forecast, s);
+  const [y1] = E.forecast({ ...p.forecast, entity: 'osek' }, s);
   near(y1.revenue, 1200000);
   near(y1.ebitda, 1200000 * 0.6 - 240000 - 360000); // 120,000
   const debt1 = E.debtByYear(s)[0];
   near(y1.interest, debt1.interest);
-  near(y1.tax, (120000 - debt1.interest) * 0.2);
+  // המס נגזר מצורת ההתאגדות ומגובה הרווח, ולא משיעור שטוח
+  near(y1.tax, E.taxFor(120000 - debt1.interest, 'osek').total);
   near(y1.dscr, (120000 - y1.tax - 120000) / debt1.payment);
 });
 
