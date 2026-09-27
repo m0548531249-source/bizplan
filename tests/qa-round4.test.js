@@ -107,33 +107,42 @@ test('טבלת היעד של מאיר (בלי שורת מס): 33,242 / 12,735 / 
   assert.equal(ROUND(rows[11].closing), 306409);
 });
 
-// הטבלה עם שורת המס עודכנה אחרי תיקון באג חוסם 2 של סבב QA 5: ביטוח לאומי לעצמאי
-// כולל מעכשיו גם דמי ביטוח בריאות, ולכן המס בשנה 1 עלה ב-18,518 ₪ וכל יתרת סגירה
-// ירדה ב-1,543 ₪ לחודש מצטבר. טבלת היעד המקורית של מאיר (בלי שורת מס) לא זזה.
-test('טבלת היעד המעודכנת (עם שורת המס): 21,073 / -11,604 / -18,031 / 160,376', () => {
+// הטבלה עם שורת המס עודכנה פעמיים: (1) סבב QA 5 באג חוסם 2 – ביטוח לאומי לעצמאי כולל
+// מעכשיו גם דמי ביטוח בריאות, ולכן המס בשנה 1 עלה ב-18,518 ₪; (2) 27.09.2026 – המס נפרס
+// בתזרים לפי הפעילות בפועל של כל חודש (taxSpread) ולא ב-1/12 קבוע. בחודשים 1–2 העסק עוד
+// בהפסד תפעולי ולכן אין מס כלל, ושתי היתרות הראשונות זהות לטבלת היעד של מאיר (בלי מס).
+// סך המס השנתי לא השתנה, ולכן יתרת חודש 12 נשארה 160,376 ₪.
+test('טבלת היעד המעודכנת (עם שורת המס, בפריסה לפי הפעילות): 33,242 / 12,735 / 11,699 / 160,376', () => {
   const res = E.computePlan(cafe());
-  assert.equal(ROUND(res.cash[0].closing), 21073);
-  assert.equal(ROUND(res.cash[1].closing), -11604);
-  assert.equal(ROUND(res.cash[2].closing), -18031);
+  assert.equal(ROUND(res.cash[0].closing), 33242);
+  assert.equal(ROUND(res.cash[1].closing), 12735);
+  assert.equal(ROUND(res.cash[2].closing), 11699);
   assert.equal(ROUND(res.cash[11].closing), 160376);
-  // הגשר בין שתי הטבלאות: ההפרש הוא בדיוק המס המצטבר, ולא שינוי אחר בתזרים
-  const monthly = res.years[0].tax / 12;
+  // הגשר בין שתי הטבלאות: ההפרש הוא בדיוק המס שנגבה עד אותו חודש, ולא שינוי אחר בתזרים
+  let paid = 0;
   [[0, 33242], [1, 12735], [2, 18477], [11, 306409]].forEach(([i, target]) => {
-    near(res.cash[i].closing + monthly * (i + 1), target, 1);
+    paid = res.cash.slice(0, i + 1).reduce((s, c) => s + c.tax, 0);
+    near(res.cash[i].closing + paid, target, 1);
   });
 });
 
-test('ת1 שורת מס בתזרים: 1/12 מהמס השנתי בכל חודש, וסך השורה = המס של שנה 1', () => {
+test('ת1 שורת מס בתזרים: לפי הפעילות בפועל של כל חודש, וסך השורה = המס של שנה 1', () => {
   const res = E.computePlan(cafe());
-  const monthly = res.years[0].tax / 12;
-  assert.ok(monthly > 0);
-  res.cash.forEach((c) => near(c.tax, monthly, 0.001));
-  near(res.cash.reduce((s, c) => s + c.tax, 0), res.years[0].tax, 0.01);
-  // התזרים ופרק יכולת ההחזר מנכים מעכשיו את אותו מס
-  near(res.cash.reduce((s, c) => s + c.tax, 0), res.years[0].incomeTax + res.years[0].ni, 0.01);
+  const total = res.cash.reduce((s, c) => s + c.tax, 0);
+  // סך המס בתזרים = המס השנתי. זו הזהות שאסור לשבור בשום פריסה
+  near(total, res.years[0].tax, 0.01);
+  // התזרים ופרק יכולת ההחזר מנכים את אותו מס
+  near(total, res.years[0].incomeTax + res.years[0].ni, 0.01);
+  // הפריסה עצמה: בחודשי ההרצה נמוכה, ובקצב המלא גבוהה מהממוצע החודשי
+  const avg = res.years[0].tax / 12;
+  assert.ok(avg > 0);
+  assert.equal(ROUND(res.cash[0].tax), 0, 'חודש 1 – הפסד תפעולי, אין מקדמה');
+  assert.ok(res.cash[2].tax > 0 && res.cash[2].tax < avg, 'חודש 3 – מס חלקי');
+  assert.ok(res.cash[11].tax > avg, 'בקצב מלא המס גבוה מהממוצע');
   const app = read('app.js');
   assert.ok(app.includes('taxCashRowLabel(b.entity)'), 'שורת המס מוצגת בטבלת התזרים');
-  assert.ok(app.includes('1/12 מהמס השנתי המשוער'), 'המסמך מצהיר שזו הערכה חודשית');
+  assert.ok(app.includes('לפי הפעילות בפועל של אותו חודש'), 'המסמך מסביר את הפריסה');
+  assert.ok(app.includes('מקדמות'), 'ומסייג שהתשלום בפועל הוא במקדמות');
 });
 
 test('#1+#2 לא נוגעים בפרק 6 ובפרק 9: 1,575,000 / 418,500, ו-DSCR זהה בהינתן אותו מס', () => {
@@ -293,7 +302,12 @@ test('#5 מרווח תזרים: הסף הוא חודש הוצאות קבועות
   assert.equal(res.cushion.threshold, 57000, 'הוצאות קבועות 22,000 ושכר 35,000');
   assert.equal(res.cushion.month, 3, 'החודש הנמוך ביותר');
   near(res.cushion.min, ROUND(res.cash[2].closing), 1);
-  assert.equal(res.cushion.level, 'risk', 'עם שורת המס התזרים כן נכנס למינוס');
+  // מאז פריסת המס לפי הפעילות בפועל (27.09.2026) התזרים לא נכנס למינוס, אבל היתרה
+  // הנמוכה (11,699 ₪) עדיין קטנה מחודש הוצאות – וזה בדיוק מה שהבאג הזה בא למדוד:
+  // "אין חודש שלילי" הוא לא הסף.
+  assert.equal(res.cushion.level, 'warn', 'יתרה חיובית אך דקה – אזהרה, לא הצהרה שהתזרים חיובי');
+  assert.ok(res.cushion.min > 0 && res.cushion.min < res.cushion.threshold);
+  assert.deepEqual(res.negativeMonths, [], 'ובפריסת המס החדשה אין חודש שלילי');
 });
 
 test('#5 מרווח תזרים: יתרה חיובית אך דקה מסומנת כאזהרה, ולא כ"התזרים יישאר חיובי"', () => {
@@ -330,9 +344,13 @@ test('#5 המשפט במסמך נגזר מהיתרה המינימלית, ולא 
 // ---------- גל א', שלושת הממצאים הלא-חוסמים מסבב QA 4 ----------
 
 test('ל1 גישור על חודשי מינוס: לעסק בהקמה לא מצהירים על "מסגרת אשראי קיימת"', () => {
-  const res = E.computePlan(cafe());
+  // מאז פריסת המס לפי הפעילות בפועל (27.09.2026) "קפה פינת חן" עצמו כבר לא נכנס למינוס,
+  // ולכן התרחיש נבדק עם משיכת בעלים גבוהה יותר – אותו עסק, תזרים שלילי בחודשים 2–4.
+  const negative = cafe();
+  negative.forecast = { ...negative.forecast, ownerDrawMonthly: 20000 };
+  const res = E.computePlan(negative);
   assert.ok(res.negativeMonths.length > 0, 'זה בדיוק התרחיש שבו המשפט מודפס');
-  const wc = E.workingCapitalTotal(cafe());
+  const wc = E.workingCapitalTotal(negative);
   assert.equal(wc, 80000, 'ההון החוזר שכבר מוצג בפרק 5');
   // עדכון אחרי סבב QA 5, באג חוסם 1: הדרישה מסבב 4 ("לא להמציא מסגרת אשראי") נשארת,
   // אבל ההפניה להון החוזר בענף הזה בוטלה – ההון החוזר נכנס לחשבון בחודש 1 יחד עם

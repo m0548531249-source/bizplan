@@ -301,11 +301,13 @@ test('ניקוי: אין יותר בלוק <style> ב-index.html, והעיצוב
 
 test('רגרסיה: יתרות הסגירה של "קפה פינת חן" לא זזו בסבב הזה', () => {
   const res = E.computePlan(cafe());
-  // עודכן אחרי תיקון באג חוסם 2 של סבב QA 5 (ביטוח לאומי כולל דמי ביטוח בריאות):
-  // רק שורת המס בתזרים גדלה, ולכן היתרות ירדו. טבלת היעד בלי המס (למטה) לא זזה.
-  assert.equal(ROUND(res.cash[0].closing), 21073);
-  assert.equal(ROUND(res.cash[1].closing), -11604);
-  assert.equal(ROUND(res.cash[2].closing), -18031);
+  // עודכן פעמיים: (1) סבב QA 5 באג חוסם 2 – ביטוח לאומי כולל דמי ביטוח בריאות, ולכן
+  // שורת המס בתזרים גדלה; (2) 27.09.2026 – המס נפרס לפי הפעילות בפועל של כל חודש
+  // (taxSpread) ולא 1/12 קבוע, ולכן בחודשים 1–2 (הפסד תפעולי) אין מס והיתרות זהות
+  // לטבלת היעד בלי המס. סך המס השנתי לא זז, ולכן יתרת חודש 12 זהה.
+  assert.equal(ROUND(res.cash[0].closing), 33242);
+  assert.equal(ROUND(res.cash[1].closing), 12735);
+  assert.equal(ROUND(res.cash[2].closing), 11699);
   assert.equal(ROUND(res.cash[11].closing), 160376);
   // וגם טבלת היעד המקורית של מאיר (בלי שורת המס)
   const p = cafe();

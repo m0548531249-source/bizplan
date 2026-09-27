@@ -377,7 +377,18 @@
   function verdict(res) {
     const left = worstMonthlyLeft(res);
     const worstYear = res.years.reduce((a, y) => ((y.cfads - y.debtService) < (a.cfads - a.debtService) ? y : a));
-    if (res.rating.level === 'ok') return { level: 'ok', title: 'בקשה חזקה', text: `גם בשנה הקשה ביותר יישארו לכם בערך ${ils(left)} בחודש אחרי ההחזר. זה המרווח שקרנות רוצות לראות.` };
+    // דירוג הבקשה (DSCR שנתי) והמרווח בתזרים (יתרה חודשית) הם שני מדדים נפרדים:
+    // כשהשנה חזקה אבל יש חודש בודד דחוק, הכרטיס אומר את שניהם ולא מפתיע במסך הבא.
+    // כשהשנה חזקה אבל בחודש כלשהו החשבון במינוס ממש, הכותרת לא אומרת "חזקה" בלי
+    // הסתייגות: הכרטיס עובר לרמת אזהרה ומפרט חודש, סכום חסר ומה אפשר לעשות.
+    const minus = res.rating.level === 'ok' ? E.negativeMonthNote(res.cushion, res.negativeMonths, isNewBiz()) : '';
+    if (minus) {
+      return { level: 'warn', title: res.negativeMonths.length > 1 ? 'בקשה חזקה, אבל יש חודשים במינוס' : 'בקשה חזקה, אבל יש חודש במינוס', text: `לאורך השנה ההכנסות מכסות את ההחזר בנוחות: גם בשנה הקשה ביותר יישארו לכם בערך ${ils(left)} בחודש אחרי ההחזר. ${minus}` };
+    }
+    if (res.rating.level === 'ok') {
+      const thin = E.thinMonthNote(res.cushion);
+      return { level: 'ok', title: 'בקשה חזקה', text: `גם בשנה הקשה ביותר יישארו לכם בערך ${ils(left)} בחודש אחרי ההחזר. זה המרווח שקרנות רוצות לראות.${thin ? ` ${thin}` : ''}` };
+    }
     if (res.rating.level === 'warn') return { level: 'warn', title: 'בקשה גבולית', text: `ההכנסות מכסות את ההחזר, אבל בדוחק: בשנה ${worstYear.year} יישארו רק כ-${ils(Math.max(0, left))} בחודש. כדאי להקטין מעט את הסכום, להאריך את התקופה או להוסיף גרייס.` };
     return { level: 'risk', title: 'הבקשה חלשה כרגע', text: `לפי הנתונים, בשנה ${worstYear.year} יחסרו לכם כ-${ils(Math.abs(left))} בחודש כדי לעמוד בהחזר. כדאי להקטין את ההלוואה, לבדוק שוב את ההוצאות או את משיכת הבעלים.` };
   }
@@ -478,7 +489,7 @@
         <div class="snap-item"><div class="label">הסכום המקסימלי במסלול</div><div class="value">${ils(res.cap)}</div><div class="sub ${over ? 'warn-text' : ''}">${over ? 'ביקשתם יותר מהמותר' : 'אתם בתוך התקרה ✓'}</div></div>
       </div>
       <div class="verdict" data-level="${v.level}"><span class="dot"></span><div><b>${v.title}</b><p>${v.text}</p></div></div>
-      ${v.level === 'ok' ? '' : helpsHtml(planHelps(res))}
+      ${res.rating.level === 'ok' ? '' : helpsHtml(planHelps(res))}
     </div>`;
   }
 
@@ -534,7 +545,8 @@
     }
     // סעיפים 11–12: אזהרות הסתירה וההנחות החריגות חוזרות גם בסיכום, לפני ההגשה
     const fixes = [...res.warnings, ...allAlerts()];
-    if (res.negativeMonths.length) fixes.push(`${E.negativeMonthsText(res.negativeMonths)} יהיה מינוס בחשבון. אפשר להוסיף גרייס, לדחות חלק מההשקעות או להתחיל עם יותר מזומן.`);
+    // כשהדירוג חזק, כרטיס תמונת המצב שלמעלה כבר מפרט את חודשי המינוס ומה לעשות – בלי כפילות כאן
+    if (res.negativeMonths.length && res.rating.level !== 'ok') fixes.push(`${E.negativeMonthsText(res.negativeMonths)} יהיה מינוס בחשבון. אפשר להוסיף גרייס, לדחות חלק מההשקעות או להתחיל עם יותר מזומן.`);
     else if (res.cushion && res.cushion.level === 'warn') fixes.push(cushionText(res, 'wizard', plan));
     const wc = E.workingCapitalNote(plan);
     if (wc) fixes.push(wc);
@@ -568,7 +580,7 @@
       const base = `היתרה הנמוכה ביותר בתזרים היא ${min} – פחות מחודש אחד של הוצאות קבועות ושכר (${ils(c.threshold)}).`;
       return where === 'wizard'
         ? `${base} התזרים לא נכנס למינוס, אבל המרווח דק: עיכוב בתקבולים או הוצאה לא מתוכננת יכניסו את החשבון למינוס. כדאי להתחיל עם יותר מזומן, להוסיף גרייס או לדחות חלק מההשקעות.`
-        : `${base} התזרים אינו נכנס למינוס בתחזית, אך המרווח דק; ${E.thinCushionText(isNewBiz(p), E.workingCapitalTotal(p || plan))}`;
+        : `${base} התזרים אינו נכנס למינוס בתחזית, אך המרווח דק; ${E.thinCushionText(isNewBiz(p), E.workingCapitalTotal(p || plan), res.cash)}`;
     }
     return `היתרה הנמוכה ביותר בתזרים היא ${min}, יותר מחודש אחד של הוצאות קבועות ושכר (${ils(c.threshold)}). התזרים החודשי צפוי להישאר חיובי לאורך כל השנה הראשונה.`;
   }
@@ -830,7 +842,7 @@
         <p>${isNew
     ? `${dtl(b.name)} הוא עסק חדש בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, שטרם נפתח${st.openDate ? ` ומתוכנן להיפתח ב${dtl(st.openDate)}` : ''}. ${b.employees > 0 ? `בתכנון להעסיק ${b.employees === 1 ? 'עובד אחד' : N(b.employees) + ' עובדים'}.` : 'בשלב הראשון ללא עובדים שכירים.'}`
     : `${dtl(b.name)} פועל ${b.years === 1 ? 'שנה' : N(b.years) + ' שנים'} בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, ${dt(staff)}.`} ${isNew || !p.history.lastYearSales ? '' : `בשנה האחרונה הסתכם המחזור ב-${MS(p.history.lastYearSales)}, והעסק סיים אותה ב${dt(profitText(p.history.lastYearProfit))}. `}העסק מבקש הלוואה בסך ${MS(p.loan.amount)} ל-${N(p.loan.years)} שנים${p.loan.graceMonths ? `, עם גרייס של ${N(p.loan.graceMonths)} חודשים` : ''}${isNew && equity > 0 ? `, לצד הון עצמי של ${MS(equity)}` : ''}.</p>
-        <p>${dt(E.outlookText(y))} יחס כיסוי החוב הנמוך ביותר בתקופה הוא <strong>${Number.isFinite(res.minDscr) ? N(res.minDscr, 2) : '—'}</strong> (${dt(res.rating.label)}).</p>
+        <p>${dt(E.outlookText(y))} יחס כיסוי החוב הנמוך ביותר בתקופה הוא <strong>${Number.isFinite(res.minDscr) ? N(res.minDscr, 2) : '—'}</strong> (${dt(res.rating.label)}).${res.rating.level === 'ok' && res.cushion && res.cushion.level === 'risk' ? ` ${dt(E.negativeMonthSummary(res.cushion, res.negativeMonths))}` : ''}</p>
       </section>
       <section><h2>2. תיאור העסק</h2><p>${dt(b.description)}</p>
         <dl class="facts"><div><dt>צורת התאגדות</dt><dd>${dt(ENTITIES[b.entity])}</dd></div><div><dt>${dt(status.label)}</dt><dd>${dt(status.value)}</dd></div><div><dt>עובדים</dt><dd>${N(b.employees)}</dd></div><div><dt>מיקום</dt><dd>${dtl(b.city) || '—'}</dd></div>
@@ -855,7 +867,7 @@
       <section class="page-break"><h2>7. תזרים מזומנים חודשי – שנה ראשונה</h2>${cf}
         ${cashChartHtml(res)}
         <p class="note">הטבלה מפרידה בין התקבולים לתשלומים: "סה"כ תקבולים" הוא כל הכסף שנכנס באותו חודש, "סה"כ תשלומים" הוא כל הכסף שיצא, ו"תזרים נטו בחודש" הוא ההפרש ביניהם. יתרת הסגירה היא יתרת הפתיחה ועוד התזרים נטו.</p>
-        <p class="note">שורת "${dt(taxCashRowLabel(b.entity))}" היא הערכה חודשית: 1/12 מהמס השנתי המשוער של השנה הראשונה (${MS(res.years[0].tax)}). בפועל המס משולם במקדמות לפי מועדי רשות המסים, ולכן הפיזור בין החודשים עשוי להיות שונה. שורת "השקעות" היא ${isNew ? 'סך עלויות ההקמה' : 'סך פריטי ההשקעה (רכש ציוד ונכסים)'} שבפרק 5 (${MS(res.investment)}).${res.vat.amount > 0 ? ` המע"מ על רכישת הציוד (${MS(res.vat.amount)}) משולם בחודש הראשון וחוזר מרשות המסים בחודש ${N(res.vat.refundMonth)}; הוא אינו חלק מהשימושים בכספים שבפרק 5, אבל הוא צריך להיות בחשבון באותם חודשים.` : ''}</p></section>
+        <p class="note">שורת "${dt(taxCashRowLabel(b.entity))}" היא הערכה חודשית של המס שמשולם באותו חודש. סך השורה לכל השנה הוא המס המשוער של השנה הראשונה (${MS(res.years[0].tax)}), והוא מחולק בין החודשים לפי הפעילות בפועל של אותו חודש – כך שבחודשי ההרצה, שבהם המכירות עדיין נמוכות, התשלום נמוך, והוא עולה עם הקצב. כך עובדות מקדמות המס בפועל: המקדמה נגזרת מהפעילות של תקופת הדיווח ולא מחולקת שווה בשווה. זו הערכה בלבד: המועדים והסכומים המדויקים נקבעים ברשות המסים, ובביטוח לאומי המקדמה נגבית בסכום קבוע ומתעדכנת רק לפי בקשת תיקון מקדמות שהעסק יוזם. שורת "השקעות" היא ${isNew ? 'סך עלויות ההקמה' : 'סך פריטי ההשקעה (רכש ציוד ונכסים)'} שבפרק 5 (${MS(res.investment)}).${res.vat.amount > 0 ? ` המע"מ על רכישת הציוד (${MS(res.vat.amount)}) משולם בחודש הראשון וחוזר מרשות המסים בחודש ${N(res.vat.refundMonth)}; הוא אינו חלק מהשימושים בכספים שבפרק 5, אבל הוא צריך להיות בחשבון באותם חודשים.` : ''}</p></section>
       <section><h2>8. ההלוואה ולוח הסילוקין</h2>
         <p>הלוואה של ${MS(p.loan.amount)} בריבית שנתית משוערת של ${N(p.loan.ratePct, 1)}%, בשיטת שפיצר, ל-${N(p.loan.years * 12)} חודשים${p.loan.graceMonths ? `, מתוכם ${N(p.loan.graceMonths)} חודשי גרייס (ריבית בלבד, ${MS(res.graceInterest)} בחודש)` : ''}. ההחזר החודשי: <strong>${MS(res.monthlyPayment)}</strong>. סך הריבית לכל התקופה: ${MS(res.totalInterest)}.</p>${am}
         ${collateralHtml(p)}</section>

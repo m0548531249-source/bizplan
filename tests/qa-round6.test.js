@@ -114,9 +114,12 @@ test('QA6 סעיף 5: טבלת היעד של מאיר (monthlyTax=0) לא זזה
 });
 
 test('QA6 סעיף 1: במקרה "קפה פינת חן" אין הצהרה על הון חוזר כמקור גישור', () => {
+  // מאז פריסת המס לפי הפעילות בפועל (27.09.2026) התזרים של "קפה פינת חן" לא נכנס למינוס,
+  // ולכן הענף הזה נבדק על אותו עסק עם משיכת בעלים של 20,000 ₪ (מינוס בחודשים 2–4).
   const p = cafe();
+  p.forecast = { ...p.forecast, ownerDrawMonthly: 20000 };
   const res = E.computePlan(p);
-  assert.deepEqual(res.negativeMonths, [2, 3], 'התזרים נכנס למינוס בחודשים 2–3');
+  assert.deepEqual(res.negativeMonths, [2, 3, 4], 'התזרים נכנס למינוס');
   assert.ok(res.cushion.min < 0, 'היתרה הנמוכה ביותר שלילית – ההון החוזר כבר נוצל');
   const text = strip(E.bridgeText(true, E.workingCapitalTotal(p), res.cash));
   assert.ok(!/ההון החוזר/.test(text), `המשפט מפנה לכסף שכבר נוצל: ${text}`);
@@ -167,10 +170,17 @@ test('QA6 סעיף 8: סבירות – התזרים, המס וה-DSCR מתייש
   const cfads = y1.ebitda - y1.tax - 144000;
   assert.ok(close(y1.dscr, cfads / (E.amortization(200000, 7.5, 5, 0).slice(0, 12).reduce((s, r) => s + r.payment, 0)), 0.01));
   assert.ok(res.minDscr > 1.25, `DSCR מינימלי ${res.minDscr.toFixed(2)} – עדיין מעל הסף גם אחרי תיקון המס`);
-  // המינוס העמוק יותר מוסבר במלואו בתוספת המס, ולא בשום דבר אחר
-  const extraTaxPerMonth = (myNi(y1.preTax).paid - myNi(y1.preTax).insuranceOnly) / 12;
-  assert.ok(close(res.cash[2].closing, -13402 - extraTaxPerMonth * 3, 3),
-    `היתרה בחודש 3 (${R(res.cash[2].closing)}) = הישנה (-13,402) פחות 3 חודשי מס בריאות`);
+  // פריסת המס (27.09.2026): כל יתרה = הטבלה בלי מס פחות המס שנגבה עד אותו חודש, לא פחות.
+  // בחודשים 1–2 העסק בהפסד תפעולי ואין מקדמה, ולכן המינוס שנבע מ-1/12 קבוע נעלם.
+  const paidBy = (i) => res.cash.slice(0, i + 1).reduce((s, c) => s + c.tax, 0);
+  assert.equal(R(res.cash[0].tax), 0, 'חודש 1 – אין מקדמת מס בחודש הפסד');
+  assert.ok(close(paidBy(11), y1.tax, 0.01), 'וסך המקדמות = המס השנתי במלואו');
+  [[0, 33242], [1, 12735], [2, 18477], [11, 306409]].forEach(([i, noTax]) =>
+    assert.ok(close(res.cash[i].closing, noTax - paidBy(i), 2),
+      `חודש ${i + 1}: ${R(res.cash[i].closing)} = ${noTax} פחות ${R(paidBy(i))} מס`));
+  // ורכיב דמי ביטוח הבריאות (QA5 באג חוסם 2) עדיין בתוך המס שנגבה בתזרים
+  assert.ok(close(paidBy(11), myOsekTax(y1.preTax).incomeTax + myNi(y1.preTax).paid, 1),
+    'המס שנגבה בתזרים = מס הכנסה + דמי ביטוח לאומי ובריאות, בחישוב ידני');
   // התזרים מתיישב עם עצמו
   res.cash.forEach((c, i) => {
     assert.ok(close(c.closing, c.opening + c.inflow - c.outflow, 0.5), `חודש ${i + 1}`);
@@ -182,8 +192,14 @@ test('QA6 סעיף 8: אותו מקרה כחברה בע"מ – מספרים סב
   const res = E.computePlan(cafe({ business: { ...cafe().business, entity: 'company' } }));
   assert.equal(res.years[0].ni, 0);
   assert.ok(close(res.years[0].tax, res.years[0].preTax * 0.23, 1));
-  assert.ok(close(res.monthlyTax, res.years[0].tax / 12, 0.5));
-  assert.ok(res.cushion.min > -10000 && res.cushion.min < 0,
-    `מינוס רדוד יותר מאשר בעוסק, כי מס החברות נמוך מהמס האישי (${R(res.cushion.min)})`);
-  assert.ok(res.minDscr > E.computePlan(cafe()).minDscr, 'DSCR גבוה יותר – פחות מס');
+  assert.ok(close(res.monthlyTax, res.years[0].tax / 12, 0.5), 'monthlyTax הוא הממוצע החודשי בלבד');
+  // מס חברות שטוח (23%) חל על הרווח השנתי, אבל המקדמות עדיין נגזרות מהפעילות של כל חודש:
+  // בחודשי ההפסד אין מקדמה, וסך המס בתזרים = המס השנתי. הפריסה לא שינתה את הסכום.
+  assert.ok(close(res.cash.reduce((s, c) => s + c.tax, 0), res.years[0].tax, 0.01));
+  assert.equal(R(res.cash[0].tax), 0, 'חודש הפסד – אין מקדמה גם בחברה');
+  assert.ok(res.cash[11].tax > res.years[0].tax / 12, 'ובקצב מלא המקדמה גבוהה מהממוצע');
+  const osek = E.computePlan(cafe());
+  assert.ok(res.cushion.min > osek.cushion.min && res.cushion.min > 0,
+    `מרווח רחב יותר מאשר בעוסק, כי מס החברות נמוך מהמס האישי (${R(res.cushion.min)})`);
+  assert.ok(res.minDscr > osek.minDscr, 'DSCR גבוה יותר – פחות מס');
 });

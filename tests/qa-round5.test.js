@@ -96,9 +96,14 @@ test('QA5 מספרים בטקסט עטופים בבידוד כיווניות, ו
 // ---------- 2. באגים שנמצאו בסבב הזה (todo עד לתיקון) ----------
 
 test('QA5 באג 1: אסור להצהיר שהמינוס ייגושר מההון החוזר שכבר נספר בתזרים', () => {
-  const res = E.computePlan(cafe());
-  assert.deepEqual(res.negativeMonths, [2, 3], 'התזרים אכן נכנס למינוס בחודשים 2–3');
-  const text = strip(E.bridgeText(true, E.workingCapitalTotal(cafe())));
+  // עד 27.09.2026 "קפה פינת חן" נכנס למינוס בחודשים 2–3 בגלל שורת מס של 1/12 קבוע.
+  // מאז שהמס נפרס לפי הפעילות בפועל (taxSpread) התזרים שלו חיובי, ולכן הבאג הזה נבדק
+  // על אותו עסק עם משיכת בעלים של 20,000 ₪ – תזרים שלילי בחודשים 2–4.
+  const p = cafe();
+  p.forecast = { ...p.forecast, ownerDrawMonthly: 20000 };
+  const res = E.computePlan(p);
+  assert.deepEqual(res.negativeMonths, [2, 3, 4], 'התזרים אכן נכנס למינוס');
+  const text = strip(E.bridgeText(true, E.workingCapitalTotal(p)));
   // ההון החוזר (80,000) כבר נכלל בתקבולי ההלוואה בחודש 1, והיתרה שלילית *אחריו*.
   // לכן אי אפשר להציג אותו כמקור גישור נוסף במסמך שהולך לבנק.
   assert.ok(!/ההון החוזר/.test(text), `המשפט מפנה למקור כסף שכבר נוצל: ${text}`);
@@ -115,19 +120,35 @@ test('QA5 באג 2: ביטוח לאומי לעצמאי חייב לכלול גם 
   assert.ok(Math.abs(got - expected) < 500, `ביטוח לאומי ${R(got)} במקום ${R(expected)} – חסר מס בריאות`);
 });
 
-test('QA5 באג 3: שורת המס בתזרים גובה מס מלא גם בחודשי ההרצה, ומייצרת מינוס', { todo: 'חשוב – ממתין להחלטת מאיר/אורי' }, () => {
+test('QA5 באג 3: שורת המס בתזרים גובה מס מלא גם בחודשי ההרצה, ומייצרת מינוס', () => {
   const res = E.computePlan(cafe());
   const monthly = res.years[0].tax / 12;
-  // בחודש 1 העסק מוכר 37,500 ₪ (שליש מהקצב) ועדיין משלם 1/12 מהמס השנתי.
+  // בחודש 1 העסק מוכר 37,500 ₪ (שליש מהקצב) ומפסיד תפעולית – ולכן אין מקדמת מס.
   const m1Profit = res.cash[0].revenue - res.cash[0].cogs - res.cash[0].fixed - res.cash[0].salaries;
   assert.ok(res.cash[0].tax <= Math.max(0, m1Profit) * 0.5,
     `מס של ${R(res.cash[0].tax)} בחודש שבו הרווח התפעולי הוא ${R(m1Profit)}`);
   assert.ok(monthly > 0);
+  // התיקון: המס נפרס לפי הפעילות של כל חודש, וסך המס השנתי לא זז
+  assert.ok(Math.abs(res.cash.reduce((s, c) => s + c.tax, 0) - res.years[0].tax) < 0.01,
+    'סך המס בתזרים = המס השנתי');
+  assert.ok(res.cash[11].tax > res.cash[2].tax && res.cash[2].tax > res.cash[1].tax,
+    'המס עולה עם קצב הפעילות');
+  assert.deepEqual(res.negativeMonths, [], 'והמינוס שנבע מפריסת 1/12 נעלם');
 });
 
-test('QA5 באג 4: טבלת היעד של מאיר (33,242 / 12,735 / 18,477 / 306,409)', { todo: 'תלוי בהחלטה על שורת המס' }, () => {
+// באג 4 עודכן: טבלת היעד של מאיר חושבה בלי שורת מס בכלל (ראו QA6 סעיף 5, שמריץ אותה
+// עם monthlyTax=0 ומאמת את ארבעת המספרים). אחרי פריסת המס לפי הפעילות בפועל, חודשים 1–2
+// (הפסד תפעולי, אין מקדמה) זהים לטבלה במדויק, ומחודש 3 ההפרש הוא בדיוק המס שנגבה עד
+// אותו חודש – 6,778 ₪ עד חודש 3 ו-146,033 ₪ (כל המס השנתי) עד חודש 12.
+test('QA5 באג 4: טבלת היעד של מאיר (33,242 / 12,735 / 18,477 / 306,409) מול הטבלה עם המס', () => {
   const res = E.computePlan(cafe());
-  [[0, 33242], [1, 12735], [2, 18477], [11, 306409]].forEach(([i, want]) => assert.equal(R(res.cash[i].closing), want));
+  const paidBy = (i) => res.cash.slice(0, i + 1).reduce((s, c) => s + c.tax, 0);
+  [[0, 33242], [1, 12735], [2, 18477], [11, 306409]].forEach(([i, want]) =>
+    assert.equal(R(res.cash[i].closing + paidBy(i)), want, `חודש ${i + 1}`));
+  assert.equal(R(res.cash[0].closing), 33242, 'חודש 1 – אין מס, ולכן זהה לטבלת היעד');
+  assert.equal(R(res.cash[1].closing), 12735, 'חודש 2 – אין מס, ולכן זהה לטבלת היעד');
+  assert.equal(R(res.cash[2].closing), 11699, 'חודש 3 – פחות 6,778 ₪ מס');
+  assert.equal(R(res.cash[11].closing), 160376, 'חודש 12 – פחות כל המס השנתי');
 });
 
 test('QA5 באג 5: אחוז עלות מכר לא הגיוני (150%) עובר בלי אזהרה', { todo: 'חשוב – ממתין לתיקון אורי' }, () => {

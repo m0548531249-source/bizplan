@@ -240,13 +240,57 @@
   }
 
   /**
+   * הפריסה החודשית של המס בשנה הראשונה (12 מספרים, שסכומם = המס השנתי).
+   *
+   * למה לא 1/12 קבוע: מקדמות מס הכנסה אינן חלוקה שווה של המס השנתי החזוי. לפי רשות
+   * המסים, המקדמה בכל תקופת דיווח נגזרת מהפעילות בפועל של אותה תקופה (מחזור התקופה
+   * מוכפל ביחס המס שנקבע לעסק), ולכן בחודשי הרצה עם מכירות נמוכות המקדמה נמוכה
+   * ממילא. פריסה של 1/12 קבוע גבתה מס מלא כבר בחודש הראשון, שבו העסק עוד בהפסד,
+   * והציגה מינוס עמוק שלא היה קורה בפועל (מחקר 27.09.2026,
+   * company/research/04-tax-advances-new-business.md, וממצא QA סבב 5 באג 3).
+   *
+   * השיטה: שיעור מס אפקטיבי = המס השנתי חלקי סך הרווח החודשי החייב בפועל, והוא מוחל
+   * על הרווח של כל חודש. חודש בהפסד (הוצאות גבוהות מההכנסות) מקבל משקל 0 – אין ממה
+   * לגבות מס – והרווח נספר לפי אותו בסיס שעליו חושב המס השנתי: הכנסות פחות עלות מכר,
+   * הוצאות קבועות, שכר וריבית. סך המס לא משתנה, רק פריסתו.
+   *
+   * קירוב, ומודע לכך: ביטוח לאומי נגבה טכנית בסכום קבוע ומתעדכן רק אם העצמאי יוזם
+   * בקשת תיקון מקדמות (זכות רגילה כשההכנסה נמוכה ב-10%+, מה שמתקיים בחודשי הרצה).
+   * הכלי אינו מדמה את הפנייה הזאת, ומניח שהיא נעשית; ההסתייגות מוצגת למשתמש בהערה
+   * שמתחת לטבלת התזרים.
+   *
+   * @param {object} f הנחות התחזית (annualSales, cogsPct, monthlyFixed, monthlySalaries, rampMonths, currentSales)
+   * @param {number} annualTax המס השנתי של שנה 1 (מס הכנסה + ביטוח לאומי, או מס חברות)
+   * @param {{interest:number}[]} [schedule] לוח הסילוקין – הריבית של כל חודש, אם יש הלוואה
+   * @returns {number[]} 12 סכומי מס חודשיים
+   */
+  function taxSpread(f, annualTax, schedule) {
+    const total = Math.max(0, Number(annualTax) || 0);
+    const monthly = (Number(f && f.annualSales) || 0) / 12;
+    const weights = [];
+    for (let m = 1; m <= 12; m++) {
+      const revenue = monthly * salesLevel(f, m);
+      const interest = (schedule && schedule[m - 1]) ? (Number(schedule[m - 1].interest) || 0) : 0;
+      const profit = revenue * (1 - (Number(f && f.cogsPct) || 0) / 100)
+        - (Number(f && f.monthlyFixed) || 0) - (Number(f && f.monthlySalaries) || 0) - interest;
+      weights.push(Math.max(0, profit));
+    }
+    const sum = weights.reduce((s, w) => s + w, 0);
+    // בלי רווח חודשי חיובי בכלל אין על מה לפרוס, וחוזרים לחלוקה שווה כדי לא לאבד את הסכום
+    if (!(sum > 0)) return weights.map(() => total / 12);
+    return weights.map((w) => (total * w) / sum);
+  }
+
+  /**
    * תזרים חודשי לשנה הראשונה.
    * uses: [{item, amount, type:'capex'|'working'}] – השקעות (capex) יוצאות בחודש 1.
    * equity: הון עצמי שהבעלים מכניס לעסק. נכנס כתקבול בחודש 1, בדיוק כמו ההלוואה,
    * כדי שהתזרים יתיישב עם "סך ההשקעה" שמוצג בפרק המקורות והשימושים.
    * opts.capex: סך ההשקעות שיוצאות בחודש 1. כשהוא מועבר הוא מקור האמת (בעסק בהקמה –
    * טבלת עלויות ההקמה), וכשהוא לא מועבר הוא נגזר משורות ה-capex ב-uses.
-   * opts.monthlyTax: תשלום מס חודשי (הערכה: 1/12 מהמס השנתי). בלעדיו התזרים היה מציג
+   * opts.monthlyTax: תשלום המס בתזרים. מספר – אותו סכום בכל חודש; מערך של 12 מספרים –
+   * הפריסה החודשית בפועל (taxSpread), שהיא מה שהמנוע מעביר מאז 27.09.2026, כי מקדמות
+   * המס נגזרות מהפעילות של כל חודש ולא מ-1/12 קבוע. בלי שורת מס בכלל התזרים היה מציג
    * מזומן שהעסק לא באמת מחזיק, בזמן שפרק יכולת ההחזר כבר מנכה את המס.
    * opts.vat: {amount, refundMonth} – המע"מ על רכישת הציוד. יוצא בחודש 1 וחוזר מרשות
    * המסים כעבור TAX.vatRefundMonths חודשים. זה לא "שימוש בכספים" (הכסף חוזר), אבל הוא
@@ -262,7 +306,8 @@
     const capex = o.capex != null && Number.isFinite(Number(o.capex))
       ? Math.max(0, Number(o.capex))
       : (uses || []).filter((u) => u.type === 'capex').reduce((s, u) => s + (Number(u.amount) || 0), 0);
-    const monthlyTax = Math.max(0, Number(o.monthlyTax) || 0);
+    const taxByMonth = Array.isArray(o.monthlyTax) ? o.monthlyTax.map((v) => Math.max(0, Number(v) || 0)) : null;
+    const monthlyTax = taxByMonth ? 0 : Math.max(0, Number(o.monthlyTax) || 0);
     const eq = Math.max(0, Number(equity) || 0);
     const rows = [];
     for (let m = 1; m <= 12; m++) {
@@ -275,7 +320,7 @@
       const draw = f.ownerDrawMonthly || 0;
       const debt = (schedule && schedule[m - 1]) ? schedule[m - 1].payment : 0;
       const invest = m === 1 ? capex : 0;
-      const tax = monthlyTax;
+      const tax = taxByMonth ? (taxByMonth[m - 1] || 0) : monthlyTax;
       const vatOut = m === 1 ? vatAmount : 0;
       const vatIn = m === vatRefundMonth ? vatAmount : 0;
       const opening = cash;
@@ -580,9 +625,11 @@
     const years = forecast(f, schedule);
     const uses = planUses(plan);
     const vat = isNew ? equipmentVat(plan) : 0;
+    // המס נפרס לפי הפעילות בפועל של כל חודש, ולא 1/12 קבוע (ראו taxSpread)
+    const taxByMonth = taxSpread(f, years[0].tax, schedule);
     const cash = cashflow(f, plan.loan.amount, uses, schedule, equityInflow(plan), {
       capex: investmentTotal(plan),
-      monthlyTax: years[0].tax / 12,
+      monthlyTax: taxByMonth,
       vat: { amount: vat, refundMonth: 1 + TAX.vatRefundMonths },
     });
     const minDscr = Math.min(...years.map((y) => y.dscr));
@@ -595,7 +642,9 @@
       setupTotal: setupCostsTotal(plan),
       investment: investmentTotal(plan),
       vat: { amount: vat, refundMonth: 1 + TAX.vatRefundMonths },
-      monthlyTax: years[0].tax / 12,
+      annualTax: years[0].tax,
+      taxByMonth,                      // הפריסה בפועל שבטבלת התזרים
+      monthlyTax: years[0].tax / 12,   // ממוצע חודשי בלבד, לטקסט השוואתי – לא מה שנגבה בכל חודש
       monthlyPayment: firstFull ? firstFull.payment : 0,
       graceInterest: plan.loan.graceMonths > 0 ? schedule[0].payment : 0,
       totalInterest: schedule.reduce((s, r) => s + r.interest, 0),
@@ -728,16 +777,70 @@
    * עסק פועל – יש לו חשבון פעיל ומסגרת אשראי, וזו הצהרה נכונה.
    * עסק בהקמה – אין לו מסגרת אשראי ולא שאלנו אותו עליה; מפנים להון החוזר האמיתי
    * שכבר מוצג במקורות ובשימושים. אותה משפחת ממצאים של bridgeText (QA סבב 4).
-   * המשפט הזה מודפס רק כשהיתרה בתזרים עדיין חיובית (level === 'warn'), כלומר ההון
-   * החוזר אכן עוד בחשבון, והמשפט מתאר את ייעודו – ולכן הוא לא מושפע מבאג חוסם 1
-   * של סבב QA 5, שנוגע לניסוח שמודפס דווקא בחודשי מינוס (bridgeText).
+   * המשפט מודפס רק כשהיתרה בתזרים עדיין חיובית (level === 'warn'), כלומר ההון החוזר
+   * אכן עוד בחשבון – אבל לא בהכרח במלואו: בנקודה הנמוכה נשאר ממנו רק מה שהיתרה בפועל
+   * מראה. הסכום המוצג הוא לכן היתרה הנמוכה בפועל ולא סך ההון החוזר, כשיש פער
+   * (ממצא QA סבב 6: המסמך הציג 80,000 ₪ בעוד שבחשבון נשארו 11,699 ₪).
+   * כשלא מועבר מסלול תזרים בכלל, ברירת המחדל נשארת סך ההון החוזר – בשונה מ-bridgeText,
+   * שמודפס דווקא בחודשי מינוס ולכן ברירת המחדל שלו היא לא להפנות להון החוזר כלל.
    */
   function thinCushionText(isNew, workingCapital, cashOrCushion) {
     if (!isNew) return 'העסק ישמור על מסגרת אשראי זמינה ויתאים את קצב ההשקעות לתקבולים בפועל.';
     const wc = unusedWorkingCapital(workingCapital, cashOrCushion, workingCapital);
     return wc > 0.5
-      ? `ההון החוזר שבמקורות ובשימושים (${ils(wc)}) נועד בדיוק לחודשים האלה, והעסק יתאים את קצב ההשקעות לתקבולים בפועל.`
+      ? `ההון החוזר שבמקורות ובשימושים נועד בדיוק לחודשים האלה: בנקודה הנמוכה ביותר יישארו ממנו ${ils(wc)} בחשבון, והעסק יתאים את קצב ההשקעות לתקבולים בפועל.`
       : 'העסק יתאים את קצב ההשקעות לתקבולים בפועל, ובמידת הצורך יוסיף חודשי גרייס או הון עצמי לפני הפתיחה.';
+  }
+
+  /**
+   * משפט השקיפות שנלווה לכרטיס "בקשה חזקה" בתמונת המצב.
+   * דירוג הבקשה (rating) נגזר מה-DSCR השנתי, והמרווח (cushion) נגזר מיתרת המזומן
+   * החודשית הנמוכה ביותר – שני מדדים נפרדים. אפשר שהשנה כולה תיראה חזקה ובכל זאת
+   * יהיה חודש בודד שבו כמעט לא נשאר כסף בחשבון, והמשתמש גילה את זה רק במסך הבא
+   * (ממצא QA סבב 6, באג לא-חוסם: מסרים מעורבים).
+   * המשפט מוסיף שקיפות בלבד: הוא לא משנה את הדירוג, את הכותרת או את הספים.
+   * מוחזר רק כשהמרווח הוא 'warn' (יתרה חיובית אך מתחת לחודש הוצאות); כשהיתרה
+   * שלילית ('risk') הדיווח נעשה במקום אחר, בשורת חודשי המינוס.
+   */
+  function thinMonthNote(cushion) {
+    if (!cushion || cushion.level !== 'warn') return '';
+    return `שימו לב: בחודש ${cushion.month} התזרים דחוק – בחשבון צפויים להישאר ${ils(Math.max(0, cushion.min))} בלבד, פחות מחודש אחד של הוצאות קבועות ושכר.`;
+  }
+
+  /**
+   * האזהרה שנלווית לדירוג "בקשה חזקה" כשבשנה הראשונה יש חודש שבו היתרה בחשבון
+   * שלילית באמת (cushion.level === 'risk'). הדירוג השנתי (DSCR) יכול להיות חזק
+   * ובכל זאת בחודשים הראשונים לא יהיה בחשבון מספיק כסף לכל התשלומים – ואסור
+   * שמסמך או מסך יאמרו "חזקה" בלי לומר את זה.
+   * מציינת: באילו חודשים החשבון במינוס, מה החודש הקשה ביותר, כמה חסר בו (סכום
+   * חיובי), ומה אפשר לעשות. לעסק בהקמה אין מסגרת אשראי ולא שאלנו עליה, ולכן היא
+   * לא מוצעת לו; לעסק פועל היא מוצעת כדבר לבדוק מול הבנק, לא כעובדה.
+   * מחזירה מחרוזת ריקה כשהמרווח אינו 'risk' (ב-'warn' מטפל thinMonthNote).
+   */
+  function negativeMonthNote(cushion, negativeMonths, isNew) {
+    if (!cushion || cushion.level !== 'risk') return '';
+    const months = (negativeMonths || []).map(Number).filter((m) => Number.isFinite(m));
+    const missing = ils(Math.abs(Math.min(0, Number(cushion.min) || 0)));
+    const where = months.length > 1
+      ? `${negativeMonthsText(months)} החשבון צפוי להיות במינוס. בחודש הקשה ביותר, חודש ${cushion.month}, חסרים ${missing}`
+      : `בחודש ${cushion.month} של השנה הראשונה החשבון צפוי להיות במינוס: חסרים בו ${missing}`;
+    const fix = isNew === false
+      ? 'כדי לסגור את הפער אפשר להגדיל מעט את סכום ההלוואה, להוסיף חודשי גרייס, לדחות חלק מההשקעות או לבדוק מול הבנק מסגרת אשראי לחודשים האלה.'
+      : 'כדי לסגור את הפער אפשר להגדיל את ההון העצמי או מעט את סכום ההלוואה, להוסיף חודשי גרייס, לדחות חלק מההשקעות או להקטין את משיכת הבעלים בחודשים הראשונים.';
+    return `שימו לב: ${where} כדי לשלם את כל ההוצאות וההחזרים. ${fix}`;
+  }
+
+  /**
+   * ההסתייגות שבתקציר המנהלים של המסמך, כשיחס כיסוי החוב "טוב" אבל יש חודש שבו
+   * היתרה בתזרים שלילית. נכתבת לקורא בבנק (גוף שלישי), מציינת חודש וסכום חסר,
+   * ומפנה לפרק הסיכונים שבו מפורטת דרך הגישור (bridgeText) – בלי לחזור עליה.
+   */
+  function negativeMonthSummary(cushion, negativeMonths) {
+    if (!cushion || cushion.level !== 'risk') return '';
+    const months = (negativeMonths || []).map(Number).filter((m) => Number.isFinite(m));
+    const missing = ils(Math.abs(Math.min(0, Number(cushion.min) || 0)));
+    const when = months.length > 1 ? `${negativeMonthsText(months)} (בחודש הקשה ביותר, חודש ${cushion.month}, חסרים ${missing})` : `בחודש ${cushion.month} של השנה הראשונה (חסרים ${missing})`;
+    return `עם זאת, בתזרים החודשי צפויה יתרה שלילית ${when}. דרך הגישור מפורטת בפרק 9.`;
   }
 
   // ---------- גל ב', סעיפים 6–15: לוגיקה ותוכן ----------
@@ -1353,7 +1456,7 @@
     return { heading: 'ביטחונות וערבויות', paragraphs, requirement: req };
   }
 
-  const api = { FUND, TRACKS, AFFORD, TAX, maxLoan, spitzerPayment, amortization, debtByYear, rampFactor, salesLevel, bracketTax, nationalInsurance, niDeductibleExpense, taxFor, forecast, cashflow, dscrLevel, affordLevel, loanForPayment, roundAmount, repaymentOptions, equityShare, validatePlan, isNewBusiness, equityInflow, setupCostsTotal, sourcesTotal, planUses, usesTotal, investmentTotal, integrityChecks, integrityFailures, cashCushion, computePlan, ils, parseAmount, moneyText, profitText, negativeMonthsText, workingCapitalNote, workingCapitalTotal, unusedWorkingCapital, bridgeText, thinCushionText,
+  const api = { FUND, TRACKS, AFFORD, TAX, maxLoan, spitzerPayment, amortization, debtByYear, rampFactor, salesLevel, bracketTax, nationalInsurance, niDeductibleExpense, taxFor, taxSpread, forecast, cashflow, dscrLevel, affordLevel, loanForPayment, roundAmount, repaymentOptions, equityShare, validatePlan, isNewBusiness, equityInflow, setupCostsTotal, sourcesTotal, planUses, usesTotal, investmentTotal, integrityChecks, integrityFailures, cashCushion, computePlan, ils, parseAmount, moneyText, profitText, negativeMonthsText, workingCapitalNote, workingCapitalTotal, unusedWorkingCapital, bridgeText, thinCushionText, thinMonthNote, negativeMonthNote, negativeMonthSummary,
     // גל ב' (סעיפים 6–15)
     outlookText, DEPRECIATION_NOTE, ownerDrawNote, reconciliation, conflictWarnings, CONFLICT_FIELDS,
     ASSUMPTIONS, operatingMarginPct, assumptionWarnings, setupExtras, SETUP_EXTRA_FIELDS, equipmentVat,

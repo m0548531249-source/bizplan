@@ -346,11 +346,13 @@ test('15 פרק השוק: לקוחות, מתחרים, תמחור ויתרון �
 
 test('רגרסיה: "קפה פינת חן" – אותן יתרות סגירה ואותן בדיקות תקינות כמו אחרי גל א\'', () => {
   const res = E.computePlan(cafe());
-  // עודכן אחרי תיקון באג חוסם 2 של סבב QA 5 (ביטוח לאומי כולל דמי ביטוח בריאות):
-  // המס בשנה 1 עלה מ-127,515 ₪ ל-146,033 ₪ (רכיב הבריאות, 18,518 ₪), ולכן היתרות ירדו.
-  assert.equal(Math.round(res.cash[0].closing), 21073);
-  assert.equal(Math.round(res.cash[1].closing), -11604);
-  assert.equal(Math.round(res.cash[2].closing), -18031);
+  // עודכן פעמיים: (1) סבב QA 5 באג חוסם 2 – המס בשנה 1 עלה מ-127,515 ₪ ל-146,033 ₪
+  // (רכיב ביטוח הבריאות, 18,518 ₪); (2) 27.09.2026 – פריסת המס בתזרים לפי הפעילות
+  // בפועל של כל חודש (taxSpread) במקום 1/12 קבוע: בחודשים 1–2 העסק בהפסד ולכן אין מס,
+  // והיתרות חזרו לערכי טבלת היעד בלי מס. סך המס השנתי לא השתנה (חודש 12 זהה).
+  assert.equal(Math.round(res.cash[0].closing), 33242);
+  assert.equal(Math.round(res.cash[1].closing), 12735);
+  assert.equal(Math.round(res.cash[2].closing), 11699);
   assert.equal(Math.round(res.cash[11].closing), 160376);
   assert.deepEqual(res.checks.map((c) => c.code), ['sources', 'invest', 'items']);
   assert.deepEqual(res.blocking, []);

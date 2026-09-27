@@ -136,7 +136,13 @@ test('17 גרף קו: נקודה לכל חודש, מימין לשמאל, בתו�
   // ערך נמוך יותר = y גדול יותר (ציר הפוך ב-SVG)
   const min = c.points.reduce((a, b) => (b.value < a.value ? b : a));
   assert.ok(c.points.every((pt) => pt.y <= min.y + 0.01), 'הנקודה הנמוכה ביותר היא הנמוכה בגרף');
-  assert.ok(c.points.some((pt) => pt.negative), 'חודש שלילי מסומן ככזה (במקרה הבדיקה יש כאלה)');
+  // מאז פריסת המס לפי הפעילות בפועל (27.09.2026) התזרים של "קפה פינת חן" לא נכנס למינוס,
+  // ולכן סימון החודש השלילי נבדק על תרחיש שכן נכנס למינוס: משיכת בעלים גבוהה יותר.
+  const negative = E.computePlan(cafe({ forecast: { ...cafe().forecast, ownerDrawMonthly: 20000 } }));
+  assert.ok(negative.negativeMonths.length, 'התרחיש אכן שלילי');
+  const cn = E.lineChartData(E.cashLineSeries(negative));
+  assert.ok(cn.points.some((pt) => pt.negative), 'חודש שלילי מסומן ככזה');
+  assert.ok(!c.points.some((pt) => pt.negative), 'ובתרחיש החיובי אין סימון שלילי');
 });
 
 test('17 גרף עמודות: שלוש שנים × שלוש סדרות, גובה יחסי לערך', () => {
@@ -355,9 +361,12 @@ test('21 המסמך עוטף כל טקסט ומספר לפני ה-escaping', () 
 test('רגרסיה: "קפה פינת חן" – יתרות הסגירה ובדיקות התקינות לא השתנו', () => {
   const res = E.computePlan(cafe());
   const closing = res.cash.map((c) => Math.round(c.closing));
-  // הערכים עודכנו אחרי תיקון באג חוסם 2 של סבב QA 5 (ביטוח לאומי לעצמאי כולל מעכשיו
-  // גם דמי ביטוח בריאות): המס בשנה 1 עלה, ולכן כל יתרות הסגירה ירדו. שאר התזרים לא נגע.
-  assert.deepEqual([closing[0], closing[1], closing[2], closing[11]], [21073, -11604, -18031, 160376]);
+  // הערכים עודכנו פעמיים: (1) סבב QA 5 באג חוסם 2 – ביטוח לאומי לעצמאי כולל גם דמי
+  // ביטוח בריאות, ולכן המס בשנה 1 עלה; (2) 27.09.2026 – המס נפרס בתזרים לפי הפעילות
+  // בפועל של כל חודש ולא 1/12 קבוע (taxSpread), ולכן בחודשים 1–2, שבהם העסק בהפסד,
+  // אין מס כלל והיתרות זהות לטבלה בלי מס (33,242 / 12,735). יתרת חודש 12 לא זזה –
+  // סך המס השנתי לא השתנה, רק פריסתו.
+  assert.deepEqual([closing[0], closing[1], closing[2], closing[11]], [33242, 12735, 11699, 160376]);
   assert.deepEqual(res.checks.map((c) => c.ok), [true, true, true]);
   assert.equal(res.blocking.length, 0);
   near(res.years[0].revenue, 1575000, 1);
