@@ -23,13 +23,16 @@
     isSample: true,
     business: { name: 'מאפיית השכונה', entity: 'osek', field: 'מאפייה ומכירת מאפים טריים', city: 'בית שמש', years: 3, employees: 4, isNew: false,
       description: 'מאפייה שכונתית שמוכרת לחמים, חלות ומאפים טריים ללקוחות פרטיים, ומספקת לשלוש מכולות באזור.' },
-    owner: { name: 'ישראל ישראלי', experience: '12 שנות ניסיון כאופה, מתוכן 3 שנים בניהול המאפייה.' },
+    owner: { name: 'ישראל ישראלי', experience: '12 שנות ניסיון כאופה, מתוכן 3 שנים בניהול המאפייה.',
+      education: 'קורס אפייה מקצועית במכללת תדמור, והשתלמות בניהול עסק קטן במרכז לקידום עסקים (מעוף).' },
     market: { customers: 'משפחות בשכונה, מכולות ומוסדות באזור. ביקוש גבוה במיוחד לקראת שבת וחגים.',
       competitors: 'שתי מאפיות רשת באזור התעשייה ורשתות שיווק.',
+      pricing: 'מחירי הלחמים דומים למחירי הרשתות, והמאפים המיוחדים מתומחרים כ-10% מעליהם בזכות הטריות והכשרות.',
       advantage: 'מוצרים טריים שנאפים באותו יום, כשרות מהודרת, ומשלוחים עד הבית בערבי שבת.' },
     history: { lastYearSales: 1150000, lastYearProfit: 160000 },
-    startup: { openDate: '', equity: 0, setupCosts: [{ item: '', amount: 0 }] },
-    forecast: { annualSales: 1600000, rampMonths: 2, growthPct: 8, cogsPct: 38, monthlyFixed: 20000, monthlySalaries: 30000, ownerDrawMonthly: 12000, openingCash: 40000 },
+    startup: { openDate: '', equity: 0, setupCosts: [{ item: '', amount: 0 }], preOpenCosts: 0, deposit: 0, equipmentVat: 0 },
+    forecast: { annualSales: 1600000, rampMonths: 2, growthPct: 8, cogsPct: 38, monthlyFixed: 20000, monthlySalaries: 30000, ownerDrawMonthly: 12000, openingCash: 40000,
+      salesModel: 'total', customersPerDay: 0, avgTicket: 0, daysPerMonth: 26 },
     loan: { track: 'general', amount: 300000, ratePct: 7.5, years: 5, graceMonths: 6,
       purpose: 'רכישת תנור מסחרי שני ומקרר תעשייתי, כדי להגדיל את כושר הייצור ב-40% ולעמוד בהזמנות מהמכולות.',
       uses: [{ item: 'תנור מסחרי', amount: 180000, type: 'capex' }, { item: 'מקרר תעשייתי', amount: 45000, type: 'capex' }, { item: 'הון חוזר (חומרי גלם ומלאי)', amount: 75000, type: 'working' }] },
@@ -38,11 +41,12 @@
     isSample: false,
     // isNew = null עד שבוחרים: "העסק כבר פועל" או "עסק חדש שעוד לא נפתח"
     business: { name: '', entity: 'osek', field: '', city: '', years: 0, employees: 0, description: '', isNew: null },
-    owner: { name: '', experience: '' },
-    market: { customers: '', competitors: '', advantage: '' },
+    owner: { name: '', experience: '', education: '' },
+    market: { customers: '', competitors: '', pricing: '', advantage: '' },
     history: { lastYearSales: 0, lastYearProfit: 0 },
-    startup: { openDate: '', equity: 0, setupCosts: [{ item: '', amount: 0 }] },
-    forecast: { annualSales: 0, rampMonths: 0, growthPct: 5, cogsPct: 30, monthlyFixed: 0, monthlySalaries: 0, ownerDrawMonthly: 0, openingCash: 0 },
+    startup: { openDate: '', equity: 0, setupCosts: [{ item: '', amount: 0 }], preOpenCosts: 0, deposit: 0, equipmentVat: 0 },
+    forecast: { annualSales: 0, rampMonths: 0, growthPct: 5, cogsPct: 30, monthlyFixed: 0, monthlySalaries: 0, ownerDrawMonthly: 0, openingCash: 0,
+      salesModel: 'total', customersPerDay: 0, avgTicket: 0, daysPerMonth: 26 },
     loan: { track: 'general', amount: 0, ratePct: 7.5, years: 5, graceMonths: 0, purpose: '', uses: [{ item: '', amount: 0, type: 'capex' }] },
   };
   const ENTITIES = { osek: 'עוסק מורשה', company: 'חברה בע"מ', partnership: 'שותפות' };
@@ -55,12 +59,28 @@
   ] };
   const RAMP_OPTS = { 0: 'כבר עכשיו', 1: 'חודש', 2: 'חודשיים', 3: '3 חודשים', 6: 'חצי שנה' };
   const GROWTH_OPTS = { 0: 'לא נגדל', 5: '5%', 10: '10%', 15: '15%', 20: '20%' };
+  // סעיף 14: אפשר להזין מחזור שנתי, או לבנות אותו מלמטה – לקוחות ביום × קנייה ממוצעת × ימי פעילות
+  const SALES_MODEL_OPTS = { total: 'סכום שנתי', bottomUp: 'לפי לקוחות ביום' };
+
+  /** השדות שבונים את המחזור. זהים בעסק פועל ובעסק בהקמה, חוץ מהניסוח של השאלה */
+  function salesFields(totalLabel, totalHint) {
+    return [
+      { k: 'forecast.salesModel', label: 'איך תחשבו את המחזור?', type: 'chips', wide: 1, opts: SALES_MODEL_OPTS,
+        hint: 'אפשר להזין סכום שנתי אחד, או לבנות אותו מלמטה: כמה לקוחות ביום, כמה כל אחד קונה, וכמה ימי פעילות בחודש. החישוב יוצג גם במסמך.' },
+      { k: 'forecast.annualSales', label: totalLabel, type: 'money', req: 1, wide: 1, hint: totalHint, onlyTotal: 1 },
+      { k: 'forecast.customersPerDay', label: 'כמה לקוחות ביום?', type: 'number', req: 1, onlyBottom: 1, hint: 'ממוצע ביום פעילות רגיל' },
+      { k: 'forecast.avgTicket', label: 'כמה קונה לקוח בממוצע?', type: 'money', req: 1, onlyBottom: 1, hint: 'סכום הקנייה הממוצעת, בלי מע"מ' },
+      { k: 'forecast.daysPerMonth', label: 'כמה ימי פעילות בחודש?', type: 'number', req: 1, onlyBottom: 1, hint: 'למשל 26 ימים בעסק שפתוח שישה ימים בשבוע' },
+      { k: 'forecast.annualSales', label: 'המחזור שיוצא מהחישוב', type: 'static', wide: 1, onlyBottom: 1, value: () => bottomUpLine(),
+        hint: 'זה המספר שממנו נגזרת כל התוכנית. שינוי באחד הנתונים למעלה מעדכן אותו מיד.' },
+    ];
+  }
 
   /** שלב "הכנסות" של עסק פועל – מחליפים אותו כולו כשמדובר בעסק בהקמה */
   const STEP_INCOME = { name: 'הכנסות', kicker: 'הכנסות', title: 'כמה העסק מוכר?', intro: 'הערכה סבירה מספיקה. אפשר לחזור ולתקן בכל שלב. כל הסכומים בלי מע"מ.', fields: [
     { k: 'history.lastYearSales', label: 'כמה מכרתם בשנה שעברה?', type: 'money', hint: 'המחזור השנתי, לפני הוצאות' },
     { k: 'history.lastYearProfit', label: 'כמה הרווחתם בשנה שעברה?', type: 'money', signed: 1, hint: 'אם הפסדתם, כתבו את ההפסד עם מינוס (למשל -40,000)' },
-    { k: 'forecast.annualSales', label: 'כמה תמכרו בשנה, אחרי שתקבלו את ההלוואה?', type: 'money', req: 1, wide: 1, hint: 'ההערכה שלכם למכירות בשנה מלאה, כשהכול עובד כמו שצריך' },
+    ...salesFields('כמה תמכרו בשנה, אחרי שתקבלו את ההלוואה?', 'ההערכה שלכם למכירות בשנה מלאה, כשהכול עובד כמו שצריך'),
     { k: 'forecast.rampMonths', label: 'תוך כמה זמן תגיעו לקצב המכירות הזה?', type: 'chips', wide: 1, opts: RAMP_OPTS },
     { k: 'forecast.growthPct', label: 'בכמה תגדלו כל שנה אחר כך?', type: 'chips', wide: 1, opts: GROWTH_OPTS },
   ] };
@@ -68,14 +88,22 @@
   /** אותו מקום באשף, לעסק שעוד לא נפתח: אין "שנה שעברה", יש הקמה */
   const STEP_SETUP = { name: 'הקמת העסק', kicker: 'הקמת העסק', title: 'מה צריך כדי לפתוח?', intro: 'אין לכם עדיין מספרים מהשנה שעברה, ולכן כאן מספרים על התכנון: כמה עולה לפתוח, מתי, ומה אתם מביאים מהבית.', fields: [
     { k: 'startup.setupCosts', label: 'עלויות ההקמה החד-פעמיות', type: 'uses', wide: 1, noType: 1, hint: 'כל מה שצריך כדי לפתוח: שיפוץ, רישוי, ציוד ראשוני, מלאי פתיחה – גם מה שלא ממומן מההלוואה' },
+    // סעיף 13: שדות שחסרו בהזנה ושבלעדיהם התזרים של החודשים הראשונים לא נכון
+    { k: 'startup.preOpenCosts', label: 'הוצאות לפני הפתיחה', type: 'money', hint: 'שכירות בתקופת השיפוץ, רישוי, אגרות, ייעוץ – כסף שיוצא לפני שיש הכנסה' },
+    { k: 'startup.deposit', label: 'פיקדון או ערבות לשכירות', type: 'money', hint: 'הסכום שמופקד אצל בעל הנכס. הוא חוזר בסוף התקופה, אבל צריך להיות לכם אותו ביום החתימה' },
+    { k: 'startup.equipmentVat', label: 'מע"מ על רכישת הציוד', type: 'money', wide: 1,
+      hint: `הציוד נרכש כולל מע"מ (${E.TAX.vatRatePct}%), ועוסק מורשה מקבל אותו בחזרה מרשות המסים כעבור כחודשיים. בתזרים זה מוצג כיציאה בחודש 1 והחזר בחודש ${1 + E.TAX.vatRefundMonths}. אם אתם פטורים ממע"מ – השאירו 0.` },
     { k: 'startup.openDate', label: 'מתי אתם מתכננים לפתוח?', type: 'text', ph: 'למשל: מרץ 2027' },
     { k: 'startup.equity', label: 'כמה כסף משלכם אתם מכניסים לעסק?', type: 'money', hint: 'הון עצמי: חסכונות, כסף של שותף, הלוואת בעלים' },
-    { k: 'forecast.annualSales', label: 'כמה אתם צופים למכור בשנה, כשהעסק יעבוד בקצב מלא?', type: 'money', req: 1, wide: 1, hint: 'ההערכה שלכם לשנה מלאה, אחרי שהעסק כבר רץ' },
+    ...salesFields('כמה אתם צופים למכור בשנה, כשהעסק יעבוד בקצב מלא?', 'ההערכה שלכם לשנה מלאה, אחרי שהעסק כבר רץ'),
     { k: 'forecast.rampMonths', label: 'כמה זמן ייקח, מהיום שתפתחו, להגיע לקצב המכירות הזה – מאפס?', type: 'chips', wide: 1, hint: 'בעסק חדש מתחילים מאפס לקוחות, ולכן ההגעה לקצב מלא לוקחת זמן',
       opts: { 0: 'מיד עם הפתיחה', 1: 'חודש', 2: 'חודשיים', 3: '3 חודשים', 6: 'חצי שנה' } },
     { k: 'forecast.growthPct', label: 'בכמה תגדלו כל שנה אחר כך?', type: 'chips', wide: 1, opts: GROWTH_OPTS },
     { k: 'owner.experience', label: 'הניסיון שלכם בתחום', type: 'textarea', req: 1, wide: 1, ph: 'כמה שנים אתם בתחום, איפה עבדתם, מה ניהלתם, הכשרות',
       hint: 'בעסק בהקמה אין דוח כספי שמוכיח הצלחה, ולכן הניסיון שלכם הוא ההוכחה העיקרית שהבנק רואה. פרטו כמה שיותר.' },
+    // סעיף 15: שאלות מונחות שמהן נבנה פרק הבעלים במסמך
+    { k: 'owner.education', label: 'השכלה, קורסים והסמכות', type: 'textarea', wide: 1, ph: 'למשל: הנדסאי מזון, קורס ניהול עסק קטן, רישיון או תעודה מקצועית',
+      hint: 'גם קורס קצר או תעודה רלוונטית מחזקים את פרק הבעלים במסמך' },
   ] };
 
   const BASE_STEPS = [
@@ -93,8 +121,14 @@
     { name: 'אתם והשוק', kicker: 'האנשים והלקוחות', title: 'מי עומד מאחורי העסק?', intro: 'הבנק מלווה לאנשים, לא רק לעסקים. כמה משפטים על הניסיון שלכם ועל הלקוחות עושים הבדל.', fields: [
       { k: 'owner.name', label: 'השם שלכם', type: 'text', req: 1 },
       { k: 'owner.experience', label: 'הניסיון שלכם בתחום', type: 'textarea', req: 1, wide: 1, ph: 'כמה שנים אתם בתחום, מה עשיתם קודם, הכשרות', onlyExisting: 1 },
+      // סעיף 15: השכלה והכשרה – שאלה מונחית שמהן נבנה פרק הבעלים
+      { k: 'owner.education', label: 'השכלה, קורסים והסמכות', type: 'textarea', wide: 1, ph: 'למשל: הנדסאי מזון, קורס ניהול עסק קטן, רישיון או תעודה מקצועית',
+        hint: 'גם קורס קצר או תעודה רלוונטית מחזקים את פרק הבעלים במסמך', onlyExisting: 1 },
       { k: 'market.customers', label: 'מי הלקוחות שלכם?', type: 'textarea', req: 1, wide: 1, ph: 'למשל: משפחות בשכונה, מכולות ומוסדות באזור' },
       { k: 'market.competitors', label: 'מי המתחרים?', type: 'textarea', wide: 1, ph: 'עסקים דומים באזור או ברשת' },
+      // סעיף 15: תמחור – פרק השוק היה דל בלי זה
+      { k: 'market.pricing', label: 'איך אתם מתמחרים מול המתחרים?', type: 'textarea', wide: 1, ph: 'למשל: מחירים דומים לרשתות, ומוצרים מיוחדים ב-10% יותר',
+        hint: 'הבנק רוצה להבין איך המחיר שלכם מתיישב עם המחזור ועם הרווחיות שהבטחתם' },
       { k: 'market.advantage', label: 'למה לקוחות בוחרים דווקא בכם?', type: 'textarea', req: 1, wide: 1, ph: 'למשל: מחיר, איכות, שירות, מיקום, זמינות' },
     ] },
     STEP_INCOME,
@@ -152,6 +186,9 @@
     // עסק בהקמה: המזומן ההתחלתי הוא ההון העצמי בלבד. תוכנית שנשמרה לפני התיקון
     // עשויה להחזיק את אותו סכום בשני השדות, ואז הוא נספר פעמיים בתזרים (באג #1).
     if (out.business.isNew === true) out.forecast.openingCash = 0;
+    // סעיף 14: תוכנית שנשמרה לפני השיפור לא מכירה את מודל המחזור
+    if (out.forecast.salesModel !== 'bottomUp') out.forecast.salesModel = 'total';
+    if (!(out.forecast.daysPerMonth > 0)) out.forecast.daysPerMonth = EMPTY.forecast.daysPerMonth;
     return out;
   }
 
@@ -165,10 +202,23 @@
   /** השלבים בפועל: אותם 6 שלבים, אבל שלב "הכנסות" מוחלף ב"הקמת העסק" לעסק חדש */
   function steps() {
     const isNew = plan.business.isNew === true;
+    const bottomUp = plan.forecast.salesModel === 'bottomUp';
     return BASE_STEPS.map((s, i) => {
       const src = i === 2 && isNew ? STEP_SETUP : s;
-      return { ...src, fields: src.fields.filter((f) => !(f.onlyExisting && isNew) && !(f.onlyNew && !isNew)) };
+      return { ...src, fields: src.fields.filter((f) => !(f.onlyExisting && isNew) && !(f.onlyNew && !isNew)
+        && !(f.onlyTotal && bottomUp) && !(f.onlyBottom && !bottomUp)) };
     });
+  }
+
+  /** סעיף 14: שורת החישוב "מלמטה", מתחת לשדות. מתעדכנת תוך כדי הקלדה */
+  function bottomUpLine() {
+    const t = E.bottomUpText(plan.forecast);
+    return t || 'מלאו לקוחות ביום, קנייה ממוצעת וימי פעילות, והמחזור השנתי יחושב כאן.';
+  }
+  /** המחזור השנתי נגזר מהחישוב מלמטה, כדי שיישאר מספר אחד שכל התוכנית בנויה עליו */
+  function syncBottomUp() {
+    if (plan.forecast.salesModel !== 'bottomUp') return;
+    plan.forecast.annualSales = E.bottomUpSales(plan.forecast).annual;
   }
 
   function load() { try { const s = localStorage.getItem(STORE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
@@ -233,7 +283,7 @@
       input = `<div class="choice-cards" role="group" aria-labelledby="${id}-l">${f.opts.map((o) =>
         `<button type="button" class="choice" data-choice="${String(o.val)}" aria-pressed="${v === o.val}"><b>${esc(o.title)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>`;
     } else if (f.type === 'static') {
-      input = `<div class="static-value">${esc(typeof f.value === 'function' ? f.value() : f.value)}</div>`;
+      input = `<div class="static-value" id="${id}-static">${esc(typeof f.value === 'function' ? f.value() : f.value)}</div>`;
     } else if (f.type === 'chips') {
       input = `<div class="chips" role="group" aria-labelledby="${id}-l">${Object.entries(f.opts).map(([val, l]) =>
         `<button type="button" class="chip" data-chip="${f.k}" data-val="${val}" aria-pressed="${String(v) === String(val)}">${esc(l)}</button>`).join('')}</div>`;
@@ -306,12 +356,16 @@
   function usesTotalHtml(key = 'loan.uses') {
     const total = usesTotal(key);
     if (key !== 'loan.uses') {
-      // ההשוואה מוצגת רק כששני הצדדים ידועים – סכום ההלוואה נשאל רק בשלב מאוחר יותר
+      // ההשוואה מוצגת רק כששני הצדדים ידועים – סכום ההלוואה נשאל רק בשלב מאוחר יותר.
+      // סעיף 13: ההשוואה היא מול סך עלויות ההקמה, כולל ההוצאות לפני הפתיחה והפיקדון
+      // שנשאלים בשדות נפרדים, כדי שלא יוצג "✓ בתוך התקציב" ואז ייחסם המסמך.
       const budget = (Number(plan.startup.equity) || 0) + (Number(plan.loan.amount) || 0);
-      if (!total || !(plan.loan.amount > 0)) return `<span class="hint">סה"כ ${ils(total)}</span>`;
-      return total > budget + 1
-        ? `<span class="warn-text">סה"כ ${ils(total)}: יותר מההלוואה וההון העצמי יחד ב-${ils(total - budget)}</span>`
-        : `<span class="ok-text">✓ סה"כ ${ils(total)}, בתוך ההלוואה וההון העצמי</span>`;
+      const full = E.setupCostsTotal(plan);
+      const extra = full > total + 1 ? ` (ועם ההוצאות לפני הפתיחה והפיקדון: ${ils(full)})` : '';
+      if (!total || !(plan.loan.amount > 0)) return `<span class="hint">סה"כ ${ils(total)}${extra}</span>`;
+      return full > budget + 1
+        ? `<span class="warn-text">סה"כ ${ils(total)}${extra}: יותר מההלוואה וההון העצמי יחד ב-${ils(full - budget)}</span>`
+        : `<span class="ok-text">✓ סה"כ ${ils(total)}${extra}, בתוך ההלוואה וההון העצמי</span>`;
     }
     const diff = total - plan.loan.amount;
     if (!plan.loan.amount) return `<span class="hint">סה"כ ${ils(total)}</span>`;
@@ -341,6 +395,36 @@
     }
     const base = `בעסקים חדשים נהוג לדרוש הון עצמי של כ-20% מסך ההשקעה. לפי מה שהזנתם יש לכם כ-${num(share.pct, 0)}% – ${ils(eq)} מתוך השקעה כוללת של ${ils(share.total)}.`;
     return share.below ? `${base} הגדלת ההון העצמי, או הקטנת ההלוואה, יקרבו אתכם לשיעור הנהוג.` : base;
+  }
+
+  /**
+   * סעיפים 11–12: אזהרות בשלב ההזנה.
+   * 11 – טקסט חופשי שסותר את המסלול שנבחר (עסק בהקמה שכותב "הרחבת ההיצע").
+   * 12 – הנחות חריגות (רווח תפעולי גבוה, הגעה מהירה מדי לקצב מלא, מחזור לעובד).
+   * שתיהן מוצגות בממשק בלבד ואינן חוסמות: המשתמש מחליט מה לעשות איתן.
+   */
+  function conflictStep(key) {
+    if (key.indexOf('business.') === 0) return 0;
+    if (key.indexOf('loan.') === 0) return 4;
+    if (key.indexOf('owner.') === 0) return isNewBiz() ? 2 : 1;
+    return 1;
+  }
+  const ASSUMPTION_STEP = { margin: 3, ramp: 2, perWorker: 2 };
+  function stepAlerts(i) {
+    const items = [];
+    E.conflictWarnings(plan).forEach((c) => { if (conflictStep(c.key) === i) items.push(c.text); });
+    E.assumptionWarnings(plan).forEach((a) => { if ((ASSUMPTION_STEP[a.code] || 3) === i) items.push(a.text); });
+    return items;
+  }
+  function stepAlertsHtml() {
+    const items = stepAlerts(step);
+    if (!items.length) return '<div id="step-alerts" hidden></div>';
+    return `<div id="step-alerts"><h3 style="font-family:var(--serif);font-size:20px;margin:24px 0 0">כדאי לשים לב</h3>
+      <ul class="fixes">${items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
+  }
+  /** כל האזהרות שאינן תלויות שלב – למסך הסיכום */
+  function allAlerts() {
+    return [...E.conflictWarnings(plan).map((c) => c.text), ...E.assumptionWarnings(plan).map((a) => a.text)];
   }
 
   function goodToKnowHtml() {
@@ -415,7 +499,7 @@
     $('step-title').textContent = s.title;
     $('step-intro').textContent = s.intro;
     const extra = step === 4 ? snapshotHtml() : (step === 2 && isNewBiz() ? goodToKnowHtml() : '');
-    $('form').innerHTML = `<div class="fields">${s.fields.map(fieldHtml).join('')}</div>${extra}`;
+    $('form').innerHTML = `<div class="fields">${s.fields.map(fieldHtml).join('')}</div>${stepAlertsHtml()}${extra}`;
     $('next').textContent = step === ST.length - 2 ? 'לסיכום' : 'המשך';
     $('next').hidden = false;
   }
@@ -448,14 +532,19 @@
       $('next').hidden = true;
       return;
     }
-    const fixes = [...res.warnings];
+    // סעיפים 11–12: אזהרות הסתירה וההנחות החריגות חוזרות גם בסיכום, לפני ההגשה
+    const fixes = [...res.warnings, ...allAlerts()];
     if (res.negativeMonths.length) fixes.push(`${E.negativeMonthsText(res.negativeMonths)} יהיה מינוס בחשבון. אפשר להוסיף גרייס, לדחות חלק מההשקעות או להתחיל עם יותר מזומן.`);
     else if (res.cushion && res.cushion.level === 'warn') fixes.push(cushionText(res, 'wizard', plan));
     const wc = E.workingCapitalNote(plan);
     if (wc) fixes.push(wc);
     $('step-title').textContent = `התוכנית של ${plan.business.name} מוכנה`;
     $('step-intro').textContent = 'ככה הבקשה נראית במספרים. אפשר לחזור לכל שלב ולשנות.';
-    $('form').innerHTML = snapshotHtml() + (fixes.length ? `<h2 style="font-family:var(--serif);font-size:22px;margin:28px 0 0">כדאי לטפל לפני ההגשה</h2><ul class="fixes">${fixes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
+    // סעיף 9: "טוב לדעת מראש" הוא מידע למגיש ולא למסמך שמיועד לגוף המממן,
+    // ולכן הוא מוצג כאן בממשק (וגם בשלב ההקמה), ולא בתוך התוכנית עצמה.
+    $('form').innerHTML = snapshotHtml()
+      + (fixes.length ? `<h2 style="font-family:var(--serif);font-size:22px;margin:28px 0 0">כדאי לטפל לפני ההגשה</h2><ul class="fixes">${fixes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '')
+      + (isNewBiz() ? goodToKnowHtml() : '');
     $('next').hidden = false;
   }
 
@@ -513,12 +602,134 @@
     if (step === 2 && isNewBiz()) {
       const box = $('goodtoknow'); if (box) box.outerHTML = goodToKnowHtml();
     }
+    const bu = $('f-forecast-annualSales-static');
+    if (bu) bu.textContent = bottomUpLine();
+    const alerts = $('step-alerts');
+    if (alerts) alerts.outerHTML = stepAlertsHtml();
     document.querySelectorAll('[data-total]').forEach((el) => { el.innerHTML = usesTotalHtml(el.dataset.total); });
   }
 
   // ---------- מסמך ----------
-  function table(head, rows, cls = '') {
-    return `<div class="tbl-wrap"><table class="${cls}"><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr${r.cls ? ` class="${r.cls}"` : ''}>${r.cells.map((c, i) => `<${i === 0 ? 'th scope="row"' : 'td'}>${c}</${i === 0 ? 'th' : 'td'}>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  /**
+   * סעיף 21 – שכבת הטקסט ב-PDF: כל מספר שנכנס למסמך נעטף בבידוד כיווניות (LRI…PDI)
+   * לפני ה-escaping ל-HTML, כדי שבהעתק-הדבק ובקורא מסך לא יתקבל "ל5- שנים" או
+   * "ביוני .2027". העטיפה היא בשכבת התצוגה בלבד; המנוע ממשיך להחזיר מספרים נקיים.
+   */
+  const bd = E.bidiText;
+  const dt = (s) => esc(bd(s));            // טקסט למסמך: בידוד מספרים ואז escaping
+  // סעיף 22: כותרת קצרה שהמשתמש הזין (שם, עיר, תחום, תאריך פתיחה) – בלי נקודתיים
+  // או נקודה מיותרים בסוף. טקסט חופשי ארוך (תיאור, ניסיון, שוק) נשאר כפי שנכתב.
+  const dtl = (s) => dt(E.tidyLabel(s));
+  const M = (n) => bd(num(n));             // סכום בתא טבלה – בלי ₪ (סעיף 20)
+  const MS = (n) => bd(ils(n));            // סכום בתוך משפט – עם ₪
+  const N = (n, d = 0) => bd(num(n, d));   // מספר רגיל: יחס, אחוז, מספר חודש
+  /** תא בשורה חד-פעמית (קבלת ההלוואה, השקעות): 0 מוצג כמקף ולא כאפס מטעה */
+  const sparseCell = (v) => (Math.abs(v) > 0.5 ? M(v) : '–');
+
+  /**
+   * טבלה במסמך. caption הוא כותרת הטבלה – שם מופיע הסימן ₪ פעם אחת, במקום בכל תא
+   * (סעיף 20).
+   */
+  function table(head, rows, cls = '', caption = '') {
+    const cap = caption ? `<caption>${dt(caption)}</caption>` : '';
+    return `<div class="tbl-wrap"><table class="${cls}">${cap}<thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr${r.cls ? ` class="${r.cls}"` : ''}>${r.cells.map((c, i) => `<${i === 0 ? 'th scope="row"' : 'td'}>${c}</${i === 0 ? 'th' : 'td'}>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+
+  /** סעיף 16 – כרטיסי המדדים בראש הדוח: חמישה מספרים, כל אחד עם הסבר בשפה פשוטה */
+  function metricsHtml(p, res) {
+    return `<section class="doc-metrics" aria-label="מדדים עיקריים">
+        ${E.headlineMetrics(p, res).map((m) => `<div class="metric metric-${m.level}">
+          <span class="m-label">${dt(m.label)}</span><b class="m-value">${dt(m.value)}</b>
+          <span class="m-note">${dt(m.note)}</span>
+        </div>`).join('')}
+      </section>`;
+  }
+
+  // ---------- סעיף 17: גרפים ב-SVG טהור (בלי ספריית צד שלישי) ----------
+
+  /** סימוני ציר הערכים, בצד ימין של הגרף כמו בקריאה בעברית */
+  function chartTicks(c) {
+    return c.ticks.map((t) => `<line class="ch-grid" x1="${c.axis.left}" y1="${t.y}" x2="${c.axis.right}" y2="${t.y}"></line>`
+      + `<text class="ch-tick" x="${c.axis.right + 8}" y="${t.y + 4}">${bd(t.label)}</text>`).join('');
+  }
+  function chartZero(c) {
+    return c.zeroY > c.axis.top && c.zeroY < c.axis.bottom
+      ? `<line class="ch-zero" x1="${c.axis.left}" y1="${c.zeroY}" x2="${c.axis.right}" y2="${c.zeroY}"></line>` : '';
+  }
+  /**
+   * הגרף יושב בתוך מסגרת שגוללת לרוחב (כמו הטבלאות), כדי שבמסך טלפון הכיתוב לא
+   * יתכווץ לגודל שאי אפשר לקרוא. הדף עצמו לא גולש – הגלילה היא בתוך המסגרת.
+   */
+  function figure(title, svg, note, extra) {
+    return `<figure class="chart"><figcaption>${dt(title)}</figcaption><div class="chart-scroll">${svg}</div>${extra || ''}${note ? `<p class="note">${dt(note)}</p>` : ''}</figure>`;
+  }
+
+  /** גרף קו של יתרת הסגירה החודשית */
+  function cashChartHtml(res) {
+    const c = E.lineChartData(E.cashLineSeries(res));
+    const worst = res.cushion || { min: 0, month: 1 };
+    const label = `גרף קו: יתרת המזומן בסוף כל חודש בשנה הראשונה. הנמוכה ביותר – ${ils(worst.min)} בחודש ${worst.month}; בסוף השנה – ${ils(res.cash[res.cash.length - 1].closing)}.`;
+    const dots = c.points.map((pt) => `<circle class="ch-dot${pt.negative ? ' neg' : ''}" cx="${pt.x}" cy="${pt.y}" r="3.5"></circle>`).join('');
+    const xlabs = c.points.map((pt, i) => `<text class="ch-xlab" x="${pt.x}" y="${c.axis.bottom + 20}">${N(i + 1)}</text>`).join('');
+    const svg = `<svg class="ch ch-line" viewBox="0 0 ${c.w} ${c.h}" role="img" aria-label="${esc(bd(label))}" preserveAspectRatio="xMidYMid meet">
+        ${chartTicks(c)}${chartZero(c)}
+        <path class="ch-path" d="${c.path}" fill="none"></path>${dots}${xlabs}
+      </svg>`;
+    return figure('יתרת המזומן בסוף כל חודש – שנה ראשונה', svg, 'הציר האופקי הוא מספר החודש, מהחודש הראשון בצד ימין. כשהקו יורד מתחת לקו האפס, החשבון נמצא במינוס באותו חודש.');
+  }
+
+  /** גרף עמודות של הרו"ה ל-3 שנים */
+  function plChartHtml(res) {
+    const c = E.barChartData(E.plBarGroups(res));
+    const label = `גרף עמודות: הכנסות, רווח תפעולי ורווח נקי בשלוש השנים. שנה 1 – הכנסות ${ils(res.years[0].revenue)} ורווח נקי ${ils(res.years[0].net)}; שנה 3 – הכנסות ${ils(res.years[2].revenue)} ורווח נקי ${ils(res.years[2].net)}.`;
+    const bars = c.groups.map((g) => g.bars.map((b) => `<rect class="ch-bar bar-${b.key}" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}"><title>${dt(`${g.label}, ${b.label}: ${ils(b.value)}`)}</title></rect>`).join('')
+      + `<text class="ch-xlab" x="${g.x}" y="${c.axis.bottom + 20}">${dt(g.label)}</text>`).join('');
+    const legend = ['revenue', 'ebitda', 'net'].map((k, i) => `<span class="lg lg-${k}">${dt(['הכנסות', 'רווח תפעולי', 'רווח נקי'][i])}</span>`).join('');
+    const svg = `<svg class="ch ch-bars" viewBox="0 0 ${c.w} ${c.h}" role="img" aria-label="${esc(bd(label))}" preserveAspectRatio="xMidYMid meet">
+        ${chartTicks(c)}${chartZero(c)}${bars}
+      </svg>`;
+    return figure('רווח והפסד – שלוש שנים', svg, '', `<p class="ch-legend">${legend}</p>`);
+  }
+
+  /**
+   * סעיף 18 – טבלת התזרים: התקבולים והתשלומים מופרדים לקבוצות, ולכל קבוצה שורת
+   * סיכום ביניים. בסוף – תזרים נטו ויתרת הסגירה.
+   */
+  function cashflowHtml(res, entity) {
+    const s = E.cashflowSections(res, { entity });
+    const cols = s.months.length + 1;
+    const row = (r, cls) => `<tr${cls ? ` class="${cls}"` : ''}><th scope="row">${dt(r.label)}</th>${r.values.map((v) => `<td>${r.sparse ? sparseCell(v) : `<span class="${v < 0 ? 'neg' : ''}">${M(v)}</span>`}</td>`).join('')}</tr>`;
+    const group = (g, cls) => `<tbody class="${cls}"><tr class="grp"><th scope="colgroup" colspan="${cols}">${dt(g.title)}</th></tr>${g.rows.map((r) => row(r)).join('')}${row(g.total, 'sub')}</tbody>`;
+    return `<div class="tbl-wrap"><table class="cf"><caption>${dt(E.MONEY_CAPTION)}</caption>
+        <thead><tr><th>חודש</th>${s.months.map((m) => `<th>${N(m)}</th>`).join('')}</tr></thead>
+        <tbody class="cf-open">${row(s.opening)}</tbody>
+        ${group(s.inflows, 'cf-in')}${group(s.outflows, 'cf-out')}
+        <tbody class="cf-bottom">${row(s.net, 'sub')}${row(s.closing, 'total')}</tbody>
+      </table></div>`;
+  }
+
+  /** סעיף 19 – טבלת תרחישים: בסיס, ‎-10% ו-‎-20% במכירות */
+  function scenariosHtml(p) {
+    const list = E.scenarios(p);
+    const rows = list.map((s) => ({
+      cls: s.key === 'base' ? 'sub' : '',
+      cells: [dt(s.label), M(s.revenue), M(s.ebitda),
+        Number.isFinite(s.minDscr) ? `<span class="${s.minDscr < 1.25 ? 'neg' : ''}">${N(s.minDscr, 2)}</span>` : '—',
+        `<span class="${s.minCash < 0 ? 'neg' : ''}">${M(s.minCash)}</span>`],
+    }));
+    const t = table(['תרחיש', 'מחזור שנה 1', 'רווח תפעולי שנה 1', 'יחס כיסוי חוב מינימלי', 'יתרת מזומן מינימלית'], rows, 'scenarios',
+      `${E.MONEY_CAPTION}. עמודת יחס כיסוי החוב היא יחס בין מספרים, ולא סכום`);
+    return `${t}<p class="note">${dt(E.scenarioNote(list))}</p>`;
+  }
+
+  /**
+   * פסקת הביטחונות והערבות בפרק 8 (החלטת מאיר, 24.09.2026). כל המשפטים מגיעים
+   * מ-E.collateralSection, בגוף שלישי, ונגזרים מסכום ההלוואה ומהסכומים שהוזנו בפועל.
+   * הכלי אינו אוסף רשימת נכסים או ערבים, והמשפט האחרון בפסקה אומר את זה במפורש.
+   */
+  function collateralHtml(p) {
+    const s = E.collateralSection(p);
+    return `<h3>${dt(s.heading)}</h3>${s.paragraphs.map((t) => `<p>${dt(t)}</p>`).join('')}`;
   }
 
   /** שם שורת המס בתזרים, לפי צורת ההתאגדות */
@@ -530,74 +741,73 @@
     const res = E.computePlan(p), b = p.business, y = res.years;
     const today = new Intl.DateTimeFormat('he-IL', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
     const isNew = isNewBiz(p);
+    const status = E.businessStatus(p); // סעיף 24: "סטטוס: עסק בהקמה" / "עסק פועל"
     const st = p.startup || { openDate: '', equity: 0, setupCosts: [] };
     const equity = Number(st.equity) || 0;
     const share = E.equityShare(equity, p.loan.amount);
     const staff = b.employees > 0 ? `ומעסיק ${b.employees === 1 ? 'עובד אחד' : b.employees + ' עובדים'}` : 'ללא עובדים שכירים';
     const pl = table(['', 'שנה 1', 'שנה 2', 'שנה 3'], [
-      { cells: ['הכנסות', ...y.map((r) => ils(r.revenue))] },
-      { cells: ['עלות המכר', ...y.map((r) => ils(r.cogs))] },
-      { cells: ['רווח גולמי', ...y.map((r) => ils(r.grossProfit))], cls: 'sub' },
-      { cells: ['הוצאות קבועות', ...y.map((r) => ils(r.fixed))] },
-      { cells: ['שכר עובדים', ...y.map((r) => ils(r.salaries))] },
-      { cells: ['רווח תפעולי (לפני פחת)', ...y.map((r) => ils(r.ebitda))], cls: 'sub' },
-      { cells: ['הוצאות מימון (ריבית)', ...y.map((r) => ils(r.interest))] },
-      { cells: ['רווח לפני מס', ...y.map((r) => ils(r.preTax))] },
+      { cells: ['הכנסות', ...y.map((r) => M(r.revenue))] },
+      { cells: ['עלות המכר', ...y.map((r) => M(r.cogs))] },
+      { cells: ['רווח גולמי', ...y.map((r) => M(r.grossProfit))], cls: 'sub' },
+      { cells: ['הוצאות קבועות', ...y.map((r) => M(r.fixed))] },
+      { cells: ['שכר עובדים', ...y.map((r) => M(r.salaries))] },
+      // סעיף 7: השם הקודם הבטיח שורת פחת שלא הייתה בטבלה. אין שורת פחת – ולכן השם
+      // הוא "רווח תפעולי", והערה מתחת לטבלה מסבירה שהפחת לא נכלל ומה המשמעות.
+      { cells: ['רווח תפעולי', ...y.map((r) => M(r.ebitda))], cls: 'sub' },
+      { cells: ['הוצאות מימון (ריבית)', ...y.map((r) => M(r.interest))] },
+      { cells: ['רווח לפני מס', ...y.map((r) => M(r.preTax))] },
       // המס מפורק לשורות אמיתיות: עוסק מורשה משלם מס הכנסה וגם ביטוח לאומי (באג #4)
       ...(b.entity === 'company'
-        ? [{ cells: ['מס חברות משוער', ...y.map((r) => ils(r.tax))] }]
-        : [{ cells: ['מס הכנסה משוער', ...y.map((r) => ils(r.incomeTax))] },
-          { cells: ['ביטוח לאומי משוער', ...y.map((r) => ils(r.ni))] }]),
-      { cells: ['רווח נקי', ...y.map((r) => ils(r.net))], cls: 'total' },
-    ]);
-    // שורת ההון העצמי מוצגת רק כשיש כזה, כדי שהתזרים יתיישב עם "סך ההשקעה" בפרק 5
-    const equityRow = res.cash.some((c) => c.equityIn)
-      ? [{ cells: ['הכנסת הון עצמי', ...res.cash.map((c) => (c.equityIn ? num(c.equityIn) : '–'))] }]
-      : [];
-    const cf = table(['חודש', ...res.cash.map((c) => c.month)], [
-      { cells: ['יתרת פתיחה', ...res.cash.map((c) => num(c.opening))] },
-      { cells: ['תקבולים ממכירות', ...res.cash.map((c) => num(c.revenue))] },
-      { cells: ['קבלת ההלוואה', ...res.cash.map((c) => (c.loanIn ? num(c.loanIn) : '–'))] },
-      ...equityRow,
-      { cells: ['עלות המכר', ...res.cash.map((c) => num(c.cogs))] },
-      { cells: ['הוצאות קבועות ושכר', ...res.cash.map((c) => num(c.fixed + c.salaries))] },
-      { cells: ['משיכת בעלים', ...res.cash.map((c) => num(c.draw))] },
-      // תשלומי המס יוצאים גם מהתזרים, ולא רק מחישוב יכולת ההחזר שבפרק 9
-      { cells: [taxCashRowLabel(b.entity), ...res.cash.map((c) => num(c.tax))] },
-      { cells: ['החזר הלוואה', ...res.cash.map((c) => num(c.debt))] },
-      { cells: ['השקעות', ...res.cash.map((c) => (c.invest ? num(c.invest) : '–'))] },
-      { cells: ['יתרת סגירה', ...res.cash.map((c) => `<span class="${c.closing < 0 ? 'neg' : ''}">${num(c.closing)}</span>`)], cls: 'total' },
-    ], 'cf');
+        ? [{ cells: ['מס חברות משוער', ...y.map((r) => M(r.tax))] }]
+        : [{ cells: ['מס הכנסה משוער', ...y.map((r) => M(r.incomeTax))] },
+          { cells: ['ביטוח לאומי משוער', ...y.map((r) => M(r.ni))] }]),
+      { cells: ['רווח נקי', ...y.map((r) => M(r.net))], cls: 'total' },
+    ], '', E.MONEY_CAPTION);
+    // סעיף 18: שורות התזרים מסודרות בקבוצות (תקבולים / תשלומים) עם שורות ביניים.
+    // המבנה מגיע מ-E.cashflowSections, כולל ההחלטה אילו שורות בכלל רלוונטיות
+    // (הון עצמי ומע"מ מופיעים רק כשיש להם סכום).
+    const cf = cashflowHtml(res, b.entity);
     const debt = E.debtByYear(res.schedule);
     const am = table(['שנה', 'תשלומים', 'מתוכם ריבית', 'מתוכם קרן', 'יתרה בסוף שנה'], debt.map((d, i) => ({
-      cells: [String(i + 1), ils(d.payment), ils(d.interest), ils(d.principal), ils(res.schedule[Math.min(res.schedule.length, (i + 1) * 12) - 1].balance)],
-    })));
+      cells: [N(i + 1), M(d.payment), M(d.interest), M(d.principal), M(res.schedule[Math.min(res.schedule.length, (i + 1) * 12) - 1].balance)],
+    })), '', E.MONEY_CAPTION);
     const dscr = table(['', 'שנה 1', 'שנה 2', 'שנה 3'], [
-      { cells: ['רווח תפעולי', ...y.map((r) => ils(r.ebitda))] },
-      { cells: [b.entity === 'company' ? 'פחות מס חברות ומשיכת בעלים' : 'פחות מס, ביטוח לאומי ומשיכת בעלים', ...y.map((r) => ils(r.tax + r.ownerDraw))] },
-      { cells: ['מזומן פנוי להחזר', ...y.map((r) => ils(r.cfads))], cls: 'sub' },
-      { cells: ['החזרי הלוואה בשנה', ...y.map((r) => ils(r.debtService))] },
-      { cells: ['יחס כיסוי חוב (DSCR)', ...y.map((r) => (Number.isFinite(r.dscr) ? num(r.dscr, 2) : '—'))], cls: 'total' },
-    ]);
+      { cells: ['רווח תפעולי', ...y.map((r) => M(r.ebitda))] },
+      { cells: [b.entity === 'company' ? 'פחות מס חברות ומשיכת בעלים' : 'פחות מס, ביטוח לאומי ומשיכת בעלים', ...y.map((r) => M(r.tax + r.ownerDraw))] },
+      { cells: ['מזומן פנוי להחזר', ...y.map((r) => M(r.cfads))], cls: 'sub' },
+      { cells: ['החזרי הלוואה בשנה', ...y.map((r) => M(r.debtService))] },
+      { cells: ['יחס כיסוי חוב (DSCR)', ...y.map((r) => (Number.isFinite(r.dscr) ? N(r.dscr, 2) : '—'))], cls: 'total' },
+    ], '', `${E.MONEY_CAPTION}. השורה האחרונה היא יחס בין מספרים, ולא סכום`);
     // מקור אמת אחד: טבלת השימושים נגזרת מהמנוע (בעסק בהקמה – מעלויות ההקמה) ולא מרשימה
     // נפרדת שהוזנה שוב בשלב ההלוואה, כדי שלא יופיעו שני סכומים לאותו פריט (באג #3)
     const usesTotalSum = res.usesTotal;
     const uses = table(['פריט', 'סוג', 'סכום'], [
-      ...res.uses.map((u) => ({ cells: [esc(u.item), u.type === 'capex' ? 'השקעה' : 'הון חוזר', ils(u.amount)] })),
-      { cells: ['סה"כ', '', ils(usesTotalSum)], cls: 'total' },
-    ]);
+      ...res.uses.map((u) => ({ cells: [dt(u.item), u.type === 'capex' ? 'השקעה' : 'הון חוזר', M(u.amount)] })),
+      { cells: ['סה"כ', '', M(usesTotalSum)], cls: 'total' },
+    ], '', E.MONEY_CAPTION);
     const setupTotal = res.setupTotal;
     const sources = table(['מקור המימון', 'סכום', 'חלק מסך ההשקעה'], [
-      { cells: ['הלוואה מהקרן', ils(p.loan.amount), share ? `${num(100 - share.pct, 0)}%` : '—'] },
-      { cells: ['הון עצמי של הבעלים', ils(equity), share ? `${num(share.pct, 0)}%` : '—'] },
-      { cells: ['סה"כ מקורות', ils(share ? share.total : p.loan.amount + equity), '100%'], cls: 'total' },
-    ]);
-    // טבלת ההתאמה: מקורות מול שימושים, שניהם באותו סכום, במקום הערה על הפרש שלא פורט
-    const reconcile = `סך המקורות (${ils(res.sourcesTotal)}) שווה לסך השימושים (${ils(usesTotalSum)}). מתוכם ${ils(setupTotal)} עלויות הקמה חד-פעמיות, שיוצאות בחודש הראשון בתזרים שבפרק 7, והיתר הון חוזר שנשאר בחשבון העסק.`;
+      { cells: ['הלוואה מהקרן', M(p.loan.amount), share ? `${N(100 - share.pct, 0)}%` : '—'] },
+      { cells: ['הון עצמי של הבעלים', M(equity), share ? `${N(share.pct, 0)}%` : '—'] },
+      { cells: ['סה"כ מקורות', M(share ? share.total : p.loan.amount + equity), '100%'], cls: 'total' },
+    ], '', `${E.MONEY_CAPTION}. העמודה האחרונה באחוזים`);
+    // סעיף 10: במקום הערה מילולית על הפרש שלא פורט – טבלת התאמה פשוטה,
+    // מקורות מול עלויות הקמה ועוד הון חוזר, שני הצדדים באותו סכום.
+    const rec = E.reconciliation(p);
+    const maxRows = Math.max(rec.sources.length, rec.uses.length);
+    const recTable = table(['מקורות המימון', 'סכום', 'שימושים', 'סכום'], [
+      ...Array.from({ length: maxRows }, (_, i) => ({
+        cells: [rec.sources[i] ? dt(rec.sources[i].label) : '', rec.sources[i] ? M(rec.sources[i].amount) : '',
+          rec.uses[i] ? dt(rec.uses[i].label) : '', rec.uses[i] ? M(rec.uses[i].amount) : ''],
+      })),
+      { cells: ['סה"כ מקורות', M(rec.sourcesTotal), 'סה"כ שימושים', M(rec.usesTotal)], cls: 'total' },
+    ], '', E.MONEY_CAPTION);
+    const reconcile = `שני הצדדים מסתכמים באותו סכום, ${ils(rec.sourcesTotal)}. עלויות ההקמה (${ils(setupTotal)}) יוצאות בחודש הראשון בתזרים שבפרק 7, וההון החוזר נשאר בחשבון העסק למימון הפעילות השוטפת בתחילת הדרך.`;
     const n = p.loan.years * 12 - p.loan.graceMonths;
     const risks = [
-      res.negativeMonths.length ? `בתזרים צפויה יתרה שלילית ${E.negativeMonthsText(res.negativeMonths)}, והיתרה הנמוכה ביותר היא ${ils(res.cushion.min)} בחודש ${res.cushion.month}. ${E.bridgeText(isNew, E.workingCapitalTotal(p))}` : cushionText(res, 'doc', p),
-      `רגישות למכירות: ירידה של 10% במכירות תקטין את הרווח התפעולי בשנה הראשונה בכ-${ils(y[0].revenue * 0.1 * (1 - p.forecast.cogsPct / 100))}.`,
+      res.negativeMonths.length ? `בתזרים צפויה יתרה שלילית ${E.negativeMonthsText(res.negativeMonths)}, והיתרה הנמוכה ביותר היא ${ils(res.cushion.min)} בחודש ${res.cushion.month}. ${E.bridgeText(isNew, E.workingCapitalTotal(p), res.cash)}` : cushionText(res, 'doc', p),
+      `רגישות למכירות: ירידה של 10% במכירות תקטין את הרווח התפעולי בשנה הראשונה בכ-${ils(y[0].revenue * 0.1 * (1 - p.forecast.cogsPct / 100))} (הפירוט המלא בטבלת התרחישים).`,
       `ריבית: התחזית מניחה ריבית שנתית של ${num(p.loan.ratePct, 1)}%. עלייה של 1% בריבית תגדיל את ההחזר החודשי בכ-${ils(E.spitzerPayment(p.loan.amount, p.loan.ratePct + 1, n) - E.spitzerPayment(p.loan.amount, p.loan.ratePct, n))}.`,
     ];
     if (isNew) risks.unshift('בעסק חדש כל התחזית מבוססת על הערכה ולא על ביצועים בפועל. יש לשמור על הנחות זהירות, ולבדוק גם את התרחיש הגרוע ביותר.');
@@ -606,46 +816,54 @@
       ${p.isSample ? '<p class="sample-banner">מסמך לדוגמה · נתונים בדויים · לא להגשה</p>' : ''}
       <header class="doc-cover">
         <p class="doc-kicker">תוכנית עסקית · בקשה להלוואה מהקרן בערבות מדינה</p>
-        <h1>${esc(b.name || 'העסק')}</h1>
-        <p>${esc(b.field)}${b.city ? ' · ' + esc(b.city) : ''}</p>
+        <h1>${dtl(b.name) || 'העסק'}</h1>
+        <p>${dtl(b.field)}${b.city ? ' · ' + dtl(b.city) : ''}</p>
         <dl class="doc-meta">
-          <div><dt>מגיש/ה</dt><dd>${esc(p.owner.name)}</dd></div>
-          <div><dt>מסלול</dt><dd>${esc(E.TRACKS[p.loan.track])}</dd></div>
-          <div><dt>סכום מבוקש</dt><dd>${ils(p.loan.amount)}</dd></div>
-          <div><dt>תאריך</dt><dd>${today}</dd></div>
+          <div><dt>מגיש/ה</dt><dd>${dtl(p.owner.name)}</dd></div>
+          <div><dt>מסלול</dt><dd>${dt(E.TRACKS[p.loan.track])}</dd></div>
+          <div><dt>סכום מבוקש</dt><dd>${MS(p.loan.amount)}</dd></div>
+          <div><dt>תאריך</dt><dd>${dt(today)}</dd></div>
         </dl>
       </header>
+      ${metricsHtml(p, res)}
       <section><h2>1. תקציר מנהלים</h2>
         <p>${isNew
-    ? `${esc(b.name)} הוא עסק חדש בתחום ${esc(b.field)}${b.city ? ' ב' + esc(b.city) : ''}, שטרם נפתח${st.openDate ? ` ומתוכנן להיפתח ב${esc(st.openDate)}` : ''}. ${b.employees > 0 ? `בתכנון להעסיק ${b.employees === 1 ? 'עובד אחד' : b.employees + ' עובדים'}.` : 'בשלב הראשון ללא עובדים שכירים.'}`
-    : `${esc(b.name)} פועל ${b.years === 1 ? 'שנה' : b.years + ' שנים'} בתחום ${esc(b.field)}${b.city ? ' ב' + esc(b.city) : ''}, ${staff}.`} ${isNew || !p.history.lastYearSales ? '' : `בשנה האחרונה הסתכם המחזור ב-${ils(p.history.lastYearSales)}, והעסק סיים אותה ב${profitText(p.history.lastYearProfit)}. `}העסק מבקש הלוואה בסך ${ils(p.loan.amount)} ל-${p.loan.years} שנים${p.loan.graceMonths ? `, עם גרייס של ${p.loan.graceMonths} חודשים` : ''}${isNew && equity > 0 ? `, לצד הון עצמי של ${ils(equity)}` : ''}.</p>
-        <p>לפי התחזית, בשנה השנייה המחזור יגיע ל-${ils(y[1].revenue)}, ובשורה התפעולית צפוי ${profitText(y[1].ebitda)}. יחס כיסוי החוב הנמוך ביותר בתקופה הוא <strong>${Number.isFinite(res.minDscr) ? num(res.minDscr, 2) : '—'}</strong> (${res.rating.label}).</p>
+    ? `${dtl(b.name)} הוא עסק חדש בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, שטרם נפתח${st.openDate ? ` ומתוכנן להיפתח ב${dtl(st.openDate)}` : ''}. ${b.employees > 0 ? `בתכנון להעסיק ${b.employees === 1 ? 'עובד אחד' : N(b.employees) + ' עובדים'}.` : 'בשלב הראשון ללא עובדים שכירים.'}`
+    : `${dtl(b.name)} פועל ${b.years === 1 ? 'שנה' : N(b.years) + ' שנים'} בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, ${dt(staff)}.`} ${isNew || !p.history.lastYearSales ? '' : `בשנה האחרונה הסתכם המחזור ב-${MS(p.history.lastYearSales)}, והעסק סיים אותה ב${dt(profitText(p.history.lastYearProfit))}. `}העסק מבקש הלוואה בסך ${MS(p.loan.amount)} ל-${N(p.loan.years)} שנים${p.loan.graceMonths ? `, עם גרייס של ${N(p.loan.graceMonths)} חודשים` : ''}${isNew && equity > 0 ? `, לצד הון עצמי של ${MS(equity)}` : ''}.</p>
+        <p>${dt(E.outlookText(y))} יחס כיסוי החוב הנמוך ביותר בתקופה הוא <strong>${Number.isFinite(res.minDscr) ? N(res.minDscr, 2) : '—'}</strong> (${dt(res.rating.label)}).</p>
       </section>
-      <section><h2>2. תיאור העסק</h2><p>${esc(b.description)}</p>
-        <dl class="facts"><div><dt>צורת התאגדות</dt><dd>${esc(ENTITIES[b.entity])}</dd></div><div><dt>ותק</dt><dd>${isNew ? 'בהקמה' : b.years + ' שנים'}</dd></div><div><dt>עובדים</dt><dd>${b.employees}</dd></div><div><dt>מיקום</dt><dd>${esc(b.city || '—')}</dd></div>
+      <section><h2>2. תיאור העסק</h2><p>${dt(b.description)}</p>
+        <dl class="facts"><div><dt>צורת התאגדות</dt><dd>${dt(ENTITIES[b.entity])}</dd></div><div><dt>${dt(status.label)}</dt><dd>${dt(status.value)}</dd></div><div><dt>עובדים</dt><dd>${N(b.employees)}</dd></div><div><dt>מיקום</dt><dd>${dtl(b.city) || '—'}</dd></div>
           ${isNew
-    ? `<div><dt>פתיחה מתוכננת</dt><dd>${esc(st.openDate || 'טרם נקבע')}</dd></div><div><dt>הון עצמי</dt><dd>${ils(equity)}</dd></div>`
-    : (p.history.lastYearSales ? `<div><dt>מחזור שנה שעברה</dt><dd>${ils(p.history.lastYearSales)}</dd></div><div><dt>תוצאת שנה שעברה</dt><dd${p.history.lastYearProfit < 0 ? ' class="neg"' : ''}>${profitText(p.history.lastYearProfit)}</dd></div>` : '')}</dl></section>
-      <section><h2>3. הבעלים</h2><p><strong>${esc(p.owner.name)}</strong>. ${esc(p.owner.experience)}</p></section>
+    ? `<div><dt>פתיחה מתוכננת</dt><dd>${dtl(st.openDate) || 'טרם נקבע'}</dd></div><div><dt>הון עצמי</dt><dd>${MS(equity)}</dd></div>`
+    : (p.history.lastYearSales ? `<div><dt>מחזור שנה שעברה</dt><dd>${MS(p.history.lastYearSales)}</dd></div><div><dt>תוצאת שנה שעברה</dt><dd${p.history.lastYearProfit < 0 ? ' class="neg"' : ''}>${dt(profitText(p.history.lastYearProfit))}</dd></div>` : '')}</dl></section>
+      <section><h2>3. הבעלים</h2>
+        ${E.ownerParagraphs(p).map((par) => `<p>${par.lead ? `<strong>${dt(par.lead)}</strong> ` : ''}${dt(par.text)}</p>`).join('')}</section>
       <section><h2>4. השוק והתחרות</h2>
-        <h3>לקוחות</h3><p>${esc(p.market.customers)}</p>
-        ${p.market.competitors ? `<h3>מתחרים</h3><p>${esc(p.market.competitors)}</p>` : ''}
-        <h3>היתרון התחרותי</h3><p>${esc(p.market.advantage)}</p></section>
-      <section><h2>5. ${isNew ? 'מקורות ושימושים' : 'מטרת ההלוואה והשימוש בכספים'}</h2><p>${esc(p.loan.purpose)}</p>
+        ${E.marketSections(p).map((sec) => `<h3>${dt(sec.heading)}</h3>${sec.texts.map((t) => `<p>${dt(t)}</p>`).join('')}`).join('')}</section>
+      <section><h2>5. ${isNew ? 'מקורות ושימושים' : 'מטרת ההלוואה והשימוש בכספים'}</h2><p>${dt(p.loan.purpose)}</p>
         ${isNew ? `<h3>מקורות המימון</h3>${sources}<h3>השימוש בכספים</h3>` : ''}${uses}
-        ${isNew ? `<p class="note">${esc(reconcile)}</p>${share && equity > 0 ? `<p class="note">ההון העצמי מהווה כ-${num(share.pct, 0)}% מסך המקורות. הוא נכנס לעסק בחודש הראשון ומוצג כתקבול בתזרים שבפרק 7. כל פריט בטבלה מוזן פעם אחת, וכל הטבלאות במסמך נגזרות ממנו.</p>` : ''}` : ''}</section>
+        ${isNew ? `<h3>התאמה בין מקורות לשימושים</h3>${recTable}<p class="note">${dt(reconcile)}</p>${share && equity > 0 ? `<p class="note">ההון העצמי מהווה כ-${N(share.pct, 0)}% מסך המקורות. הוא נכנס לעסק בחודש הראשון ומוצג כתקבול בתזרים שבפרק 7. כל פריט מופיע פעם אחת בלבד, וכל הטבלאות במסמך נגזרות ממנו.</p>` : ''}` : ''}</section>
       <section><h2>6. תחזית רווח והפסד ל-3 שנים</h2>
-        <p class="note">הנחות: מחזור שנתי בקצב מלא של ${ils(p.forecast.annualSales)}${p.forecast.rampMonths ? `, שמושג בהדרגה בתוך ${p.forecast.rampMonths} חודשים${isNew ? ' מיום הפתיחה, מאפס מכירות' : ''}` : ''}; צמיחה של ${num(p.forecast.growthPct, 1)}% בשנה; עלות מכר (הסחורה וחומרי הגלם שנכנסים למכירה) של ${num(p.forecast.cogsPct, 1)}%; עדכון הוצאות קבועות ושכר ב-3% בשנה.</p>
-        <p class="note">המס מחושב לפי צורת ההתאגדות (${esc(ENTITIES[b.entity])}): ${esc(taxMethodText(b.entity))}. בשנה הראשונה, על רווח של ${ils(y[0].preTax)}, ההערכה היא ${ils(y[0].tax)} – כ-${num(y[0].taxEffectivePct, 1)}% מהרווח. ${esc(E.TAX.note)}</p>
-        ${isNew ? '<p class="note">העסק טרם נפתח; ההנחות בתחזית מבוססות על תוכנית העסק ועל ניסיון הבעלים, ולא על נתונים היסטוריים – רמת אי-הוודאות גבוהה יותר מאשר בעסק פעיל.</p>' : ''}${pl}</section>
-      <section class="page-break"><h2>7. תזרים מזומנים חודשי – שנה ראשונה (₪)</h2>${cf}
-        <p class="note">שורת "${esc(taxCashRowLabel(b.entity))}" היא הערכה חודשית: 1/12 מהמס השנתי המשוער של השנה הראשונה (${ils(res.years[0].tax)}). בפועל המס משולם במקדמות לפי מועדי רשות המסים, ולכן הפיזור בין החודשים עשוי להיות שונה. שורת "השקעות" היא ${isNew ? 'סך עלויות ההקמה' : 'סך פריטי ההשקעה (רכש ציוד ונכסים)'} שבפרק 5 (${ils(res.investment)}).</p></section>
+        <p class="note">הנחות: מחזור שנתי בקצב מלא של ${MS(p.forecast.annualSales)}${p.forecast.rampMonths ? `, שמושג בהדרגה בתוך ${N(p.forecast.rampMonths)} חודשים${isNew ? ' מיום הפתיחה, מאפס מכירות' : ''}` : ''}; צמיחה של ${N(p.forecast.growthPct, 1)}% בשנה; עלות מכר (הסחורה וחומרי הגלם שנכנסים למכירה) של ${N(p.forecast.cogsPct, 1)}%; עדכון הוצאות קבועות ושכר ב-3% בשנה.</p>
+        ${E.usesBottomUp(p) ? `<p class="note">${dt(E.bottomUpText(p.forecast))}</p>` : ''}
+        <p class="note">המס מחושב לפי צורת ההתאגדות (${dt(ENTITIES[b.entity])}): ${dt(taxMethodText(b.entity))}. בשנה הראשונה, על רווח של ${MS(y[0].preTax)}, ההערכה היא ${MS(y[0].tax)} – כ-${N(y[0].taxEffectivePct, 1)}% מהרווח. ${dt(E.TAX.note)}</p>
+        ${isNew ? '<p class="note">העסק טרם נפתח; ההנחות בתחזית מבוססות על תוכנית העסק ועל ניסיון הבעלים, ולא על נתונים היסטוריים – רמת אי-הוודאות גבוהה יותר מאשר בעסק פעיל.</p>' : ''}${pl}
+        ${plChartHtml(res)}
+        <p class="note">${dt(E.DEPRECIATION_NOTE)}</p>
+        ${E.ownerDrawNote(b.entity, y[0].ownerDraw) ? `<p class="note">${dt(E.ownerDrawNote(b.entity, y[0].ownerDraw))}</p>` : ''}</section>
+      <section class="page-break"><h2>7. תזרים מזומנים חודשי – שנה ראשונה</h2>${cf}
+        ${cashChartHtml(res)}
+        <p class="note">הטבלה מפרידה בין התקבולים לתשלומים: "סה"כ תקבולים" הוא כל הכסף שנכנס באותו חודש, "סה"כ תשלומים" הוא כל הכסף שיצא, ו"תזרים נטו בחודש" הוא ההפרש ביניהם. יתרת הסגירה היא יתרת הפתיחה ועוד התזרים נטו.</p>
+        <p class="note">שורת "${dt(taxCashRowLabel(b.entity))}" היא הערכה חודשית: 1/12 מהמס השנתי המשוער של השנה הראשונה (${MS(res.years[0].tax)}). בפועל המס משולם במקדמות לפי מועדי רשות המסים, ולכן הפיזור בין החודשים עשוי להיות שונה. שורת "השקעות" היא ${isNew ? 'סך עלויות ההקמה' : 'סך פריטי ההשקעה (רכש ציוד ונכסים)'} שבפרק 5 (${MS(res.investment)}).${res.vat.amount > 0 ? ` המע"מ על רכישת הציוד (${MS(res.vat.amount)}) משולם בחודש הראשון וחוזר מרשות המסים בחודש ${N(res.vat.refundMonth)}; הוא אינו חלק מהשימושים בכספים שבפרק 5, אבל הוא צריך להיות בחשבון באותם חודשים.` : ''}</p></section>
       <section><h2>8. ההלוואה ולוח הסילוקין</h2>
-        <p>הלוואה של ${ils(p.loan.amount)} בריבית שנתית משוערת של ${num(p.loan.ratePct, 1)}%, בשיטת שפיצר, ל-${p.loan.years * 12} חודשים${p.loan.graceMonths ? `, מתוכם ${p.loan.graceMonths} חודשי גרייס (ריבית בלבד, ${ils(res.graceInterest)} בחודש)` : ''}. ההחזר החודשי: <strong>${ils(res.monthlyPayment)}</strong>. סך הריבית לכל התקופה: ${ils(res.totalInterest)}.</p>${am}</section>
+        <p>הלוואה של ${MS(p.loan.amount)} בריבית שנתית משוערת של ${N(p.loan.ratePct, 1)}%, בשיטת שפיצר, ל-${N(p.loan.years * 12)} חודשים${p.loan.graceMonths ? `, מתוכם ${N(p.loan.graceMonths)} חודשי גרייס (ריבית בלבד, ${MS(res.graceInterest)} בחודש)` : ''}. ההחזר החודשי: <strong>${MS(res.monthlyPayment)}</strong>. סך הריבית לכל התקופה: ${MS(res.totalInterest)}.</p>${am}
+        ${collateralHtml(p)}</section>
       <section><h2>9. יכולת החזר וסיכונים</h2>${dscr}
         <p class="note">יחס כיסוי חוב (DSCR) הוא המזומן הפנוי חלקי החזרי ההלוואה. יחס של 1.25 ומעלה נחשב בדרך כלל טוב.</p>
-        <ul>${risks.map((r) => `<li>${r}</li>`).join('')}</ul>
-        ${isNew ? `<div class="doc-info"><h3>טוב לדעת מראש</h3><p>${esc(equityLine(p))}</p><p>${esc(COLLATERAL_TEXT)}</p></div>` : ''}</section>
+        <h3>תרחישים: מה קורה אם המכירות יהיו נמוכות מהתחזית</h3>
+        ${scenariosHtml(p)}
+        <ul>${risks.map((r) => `<li>${dt(r)}</li>`).join('')}</ul></section>
       <footer class="doc-foot">המסמך הוכן בכלי עזר ("תוכנית עסקית בקליק") על סמך נתונים שמסר בעל העסק. הוא אינו מהווה ייעוץ פיננסי, ואינו קשור לממשלה או לקרן. התחזיות הן הערכה בלבד.</footer>`;
 
     $('edit').hidden = !!p.isSample;
@@ -725,6 +943,7 @@ body{padding:24px 16px} .print-bar{max-width:840px;margin:0 auto 16px;display:fl
       const u = (get(plan, t.dataset.uses) || [])[Number(t.dataset.use)];
       if (u) u[t.dataset.f] = t.dataset.f === 'amount' ? parseNum(t.value) : t.value;
     } else return;
+    syncBottomUp(); // סעיף 14: המחזור השנתי מתעדכן מיד מהחישוב מלמטה
     plan.isSample = false;
     const field = t.closest('.field');
     if (field && field.classList.contains('invalid') && String(t.value).trim()) { field.classList.remove('invalid'); const er = field.querySelector('.err'); if (er) er.remove(); }
@@ -747,7 +966,10 @@ body{padding:24px 16px} .print-bar{max-width:840px;margin:0 auto 16px;display:fl
       const cur = get(plan, t.dataset.chip);
       set(plan, t.dataset.chip, typeof cur === 'number' ? Number(t.dataset.val) : t.dataset.val);
       t.parentElement.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c === t)));
-      plan.isSample = false; save(); refreshLive();
+      plan.isSample = false;
+      // מעבר בין "סכום שנתי" ל"לפי לקוחות ביום" מחליף שדות, ולכן מציירים את השלב מחדש
+      if (t.dataset.chip === 'forecast.salesModel') { syncBottomUp(); save(); showErrors = false; renderStep(); return; }
+      save(); refreshLive();
     }
     else if (t.dataset.choice !== undefined) {
       const isNew = t.dataset.choice === 'true';

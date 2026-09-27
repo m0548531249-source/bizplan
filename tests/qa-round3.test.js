@@ -34,7 +34,9 @@ test('עלויות הקמה: המסמך לא מציג שני סכומים לאו
   assert.ok(/\.\.\.res\.uses\.map\(/.test(app), 'שורות הטבלה נגזרות מ-res.uses ולא מרשימה שהוזנה שוב');
   assert.ok(!app.includes('setupMismatch'), 'מכניזם ה"סתירה" הוסר');
   assert.ok(!app.includes('נמוכות משימושי ההלוואה'), 'ההתנצלות על ההפרש הוסרה');
-  assert.ok(app.includes('סך המקורות') && app.includes('שווה לסך השימושים'), 'במקומה טבלת התאמה מקורות מול שימושים');
+  // גל ב' סעיף 10: ההערה המילולית על ההפרש הוחלפה בטבלת התאמה אמיתית (E.reconciliation)
+  assert.ok(app.includes('E.reconciliation(p)') && app.includes('התאמה בין מקורות לשימושים'), 'במקומה טבלת התאמה מקורות מול שימושים');
+  assert.ok(app.includes('סה"כ מקורות') && app.includes('סה"כ שימושים'), 'ושני הצדדים מסוכמים בטבלה');
 });
 
 test('עלויות הקמה: המקרה של תמר מאוזן אוטומטית – הון חוזר במקום סתירה', () => {
@@ -93,10 +95,21 @@ test('הון עצמי נכנס רק בעסק בהקמה, ולא בעסק פעי�
 });
 
 test('המסמך מציג שורת "הכנסת הון עצמי" בתזרים רק כשיש הון עצמי', () => {
+  // גל ב' סעיף 18: מבנה טבלת התזרים עבר למנוע (E.cashflowSections), ולכן התנאי
+  // נבדק שם – על ההתנהגות עצמה ולא על מחרוזת ב-app.js.
+  const withEquity = E.cashflowSections(E.computePlan(newPlan()), { entity: 'osek' });
+  const row = withEquity.inflows.rows.find((r) => r.key === 'equityIn');
+  assert.ok(row, 'יש הון עצמי – השורה מופיעה');
+  assert.equal(row.label, 'הכנסת הון עצמי', 'שם השורה בעברית פשוטה');
+
+  const noEquity = newPlan();
+  noEquity.startup.equity = 0;
+  noEquity.loan.amount = 260000; // כדי שהמקורות ימשיכו לכסות את השימושים
+  const without = E.cashflowSections(E.computePlan(noEquity), { entity: 'osek' });
+  assert.equal(without.inflows.rows.find((r) => r.key === 'equityIn'), undefined, 'אין הון עצמי – אין שורה');
+
   const app = read('app.js');
-  assert.ok(app.includes("res.cash.some((c) => c.equityIn)"), 'השורה מותנית בקיום הון עצמי');
-  assert.ok(app.includes('הכנסת הון עצמי'), 'שם השורה בעברית פשוטה');
-  assert.ok(app.includes('...equityRow,'), 'השורה נכנסת לטבלת התזרים');
+  assert.ok(app.includes('E.cashflowSections(res, { entity })'), 'הטבלה במסמך נבנית מהמבנה שבמנוע');
 });
 
 test('ההון העצמי לא הופך לאזהרה ולא שובר תוכנית תקינה', () => {

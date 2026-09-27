@@ -17,6 +17,17 @@
   };
 
   /**
+   * ביטחונות וערבות אישית – הכללים הנהוגים בקרן ובבנקים המלווים.
+   * לפי פרסום הסוכנות לעסקים קטנים ובינוניים (sba.org.il), כמו FUND. זהו אומדן
+   * בלבד: ההיקף והסוג המדויקים נקבעים בבנק, ולכן כל הטקסט שנגזר מכאן מסויג.
+   */
+  const COLLATERAL = {
+    tierCap: 300000,   // עד הסכום הזה – השיעור הנמוך
+    tierPct: 10,       // אחוז ביטחונות על החלק שעד התקרה
+    upperPct: 25,      // אחוז ביטחונות על החלק שמעל התקרה
+  };
+
+  /**
    * טבלאות המס – קונפיגורציה שמתעדכנת כל שנה, ולא מספרים מפוזרים בקוד.
    * הערכה בלבד: המדרגות והשיעורים נכונים לשנת המס 2025 ומשמשים גם כהערכה ל-2026.
    * TAX.note הוא הטקסט שמוצג במסמך – חובה לאמת מול רואה חשבון לפני הגשה.
@@ -35,15 +46,23 @@
     ],
     creditPoints: 2.25,        // נקודות זיכוי לתושב ישראל (ברירת מחדל שמרנית)
     creditPointValue: 2904,    // ₪ לשנה לנקודת זיכוי
-    // ביטוח לאומי לעצמאי
+    // דמי ביטוח לאומי לעצמאי – כולל דמי ביטוח בריאות, כי שני הרכיבים נגבים יחד
+    // מאותו עצמאי ושניהם יציאת מזומן (ממצא QA סבב 5, באג חוסם 2: בלי רכיב הבריאות
+    // הרווח הנקי מיופה בכ-18,500 ₪ בשנה).
     ni: {
-      reducedRatePct: 2.87,    // עד 60% מהשכר הממוצע
-      fullRatePct: 12.83,      // מעל זה ועד התקרה
+      reducedRatePct: 5.97,    // עד 60% מהשכר הממוצע: 2.87% ביטוח לאומי + 3.10% בריאות
+      fullRatePct: 17.83,      // מעל זה ועד התקרה: 12.83% ביטוח לאומי + 5.00% בריאות
+      insuranceReducedPct: 2.87, // רכיב הביטוח הלאומי בלבד, בשיעור המופחת
+      insuranceFullPct: 12.83,   // רכיב הביטוח הלאומי בלבד, בשיעור המלא
       reducedUpTo: 90264,      // 60% מהשכר הממוצע, בשנה
       ceiling: 588360,         // תקרת ההכנסה לביטוח לאומי, בשנה
-      deductibleShare: 0.52,   // 52% מדמי הביטוח מוכרים כהוצאה לצורכי מס הכנסה
+      // 52% מדמי הביטוח הלאומי מוכרים כהוצאה לצורכי מס הכנסה. דמי ביטוח הבריאות
+      // אינם הוצאה מוכרת, ולכן הניכוי מחושב על רכיב הביטוח הלאומי בלבד.
+      deductibleShare: 0.52,
     },
     companyRatePct: 23,        // מס חברות
+    vatRatePct: 18,            // מע"מ – לחישוב המע"מ על רכישת ציוד ולהחזר ממנו
+    vatRefundMonths: 2,        // כעבור כמה חודשים עוסק מורשה מקבל בחזרה את המע"מ על הציוד
     // ניסוח כללי שנכון לכל צורות ההתאגדות: שיטת החישוב עצמה מוצגת במסמך לפי ההתאגדות
     // (taxMethodText), וההערה הזו הייתה סותרת אותה בחברה בע"מ (ממצא QA סבב 4).
     note: '',
@@ -65,12 +84,29 @@
     return tax;
   }
 
-  /** דמי ביטוח לאומי לעצמאי: שיעור מופחת עד 60% מהשכר הממוצע, שיעור מלא עד התקרה */
-  function nationalInsurance(income) {
+  /** פיצול ההכנסה לשני חלקי השיעור: עד 60% מהשכר הממוצע, ומעליו עד התקרה */
+  function niSplit(income) {
     const inc = Math.min(Math.max(0, Number(income) || 0), TAX.ni.ceiling);
-    const reduced = Math.min(inc, TAX.ni.reducedUpTo);
-    const full = Math.max(0, inc - TAX.ni.reducedUpTo);
+    return { reduced: Math.min(inc, TAX.ni.reducedUpTo), full: Math.max(0, inc - TAX.ni.reducedUpTo) };
+  }
+
+  /**
+   * דמי ביטוח לאומי לעצמאי, כולל דמי ביטוח בריאות: שיעור מופחת עד 60% מהשכר
+   * הממוצע, שיעור מלא עד התקרה. זה הסכום שהעצמאי משלם בפועל.
+   */
+  function nationalInsurance(income) {
+    const { reduced, full } = niSplit(income);
     return reduced * TAX.ni.reducedRatePct / 100 + full * TAX.ni.fullRatePct / 100;
+  }
+
+  /**
+   * החלק מדמי הביטוח שמוכר כהוצאה לצורכי מס הכנסה: 52% מרכיב הביטוח הלאומי בלבד.
+   * דמי ביטוח הבריאות אינם הוצאה מוכרת, ולכן אין לנכות 52% מהסכום המשולם כולו.
+   */
+  function niDeductibleExpense(income) {
+    const { reduced, full } = niSplit(income);
+    const insuranceOnly = reduced * TAX.ni.insuranceReducedPct / 100 + full * TAX.ni.insuranceFullPct / 100;
+    return insuranceOnly * TAX.ni.deductibleShare;
   }
 
   /**
@@ -88,7 +124,7 @@
       return { incomeTax, ni: 0, total: incomeTax, effectivePct: (incomeTax / profit) * 100, entity: ent };
     }
     const ni = nationalInsurance(profit);
-    const taxable = Math.max(0, profit - ni * TAX.ni.deductibleShare);
+    const taxable = Math.max(0, profit - niDeductibleExpense(profit));
     const credits = TAX.creditPoints * TAX.creditPointValue;
     const incomeTax = Math.max(0, bracketTax(taxable) - credits);
     const total = incomeTax + ni;
@@ -212,10 +248,15 @@
    * טבלת עלויות ההקמה), וכשהוא לא מועבר הוא נגזר משורות ה-capex ב-uses.
    * opts.monthlyTax: תשלום מס חודשי (הערכה: 1/12 מהמס השנתי). בלעדיו התזרים היה מציג
    * מזומן שהעסק לא באמת מחזיק, בזמן שפרק יכולת ההחזר כבר מנכה את המס.
+   * opts.vat: {amount, refundMonth} – המע"מ על רכישת הציוד. יוצא בחודש 1 וחוזר מרשות
+   * המסים כעבור TAX.vatRefundMonths חודשים. זה לא "שימוש בכספים" (הכסף חוזר), אבל הוא
+   * כן צריך להיות בחשבון באותם חודשים – ולכן הוא מוצג בתזרים בלבד (סעיף 13).
    * תאימות לאחור: מותר להעביר מספר במקום opts, והוא ייקרא כ-capex.
    */
   function cashflow(f, loanAmount, uses, schedule, equity, opts) {
     const o = opts && typeof opts === 'object' ? opts : { capex: opts };
+    const vatAmount = Math.max(0, Number(o.vat && o.vat.amount) || 0);
+    const vatRefundMonth = Math.max(2, Math.round(Number(o.vat && o.vat.refundMonth) || (1 + TAX.vatRefundMonths)));
     let cash = (f.openingCash || 0);
     const monthly = f.annualSales / 12;
     const capex = o.capex != null && Number.isFinite(Number(o.capex))
@@ -235,11 +276,13 @@
       const debt = (schedule && schedule[m - 1]) ? schedule[m - 1].payment : 0;
       const invest = m === 1 ? capex : 0;
       const tax = monthlyTax;
+      const vatOut = m === 1 ? vatAmount : 0;
+      const vatIn = m === vatRefundMonth ? vatAmount : 0;
       const opening = cash;
-      const inflow = revenue + loanIn + equityIn;
-      const outflow = cogs + fixed + salaries + draw + debt + invest + tax;
+      const inflow = revenue + loanIn + equityIn + vatIn;
+      const outflow = cogs + fixed + salaries + draw + debt + invest + tax + vatOut;
       cash = opening + inflow - outflow;
-      rows.push({ month: m, opening, revenue, loanIn, equityIn, cogs, fixed, salaries, draw, debt, invest, tax, inflow, outflow, closing: cash });
+      rows.push({ month: m, opening, revenue, loanIn, equityIn, vatIn, cogs, fixed, salaries, draw, debt, invest, tax, vatOut, inflow, outflow, closing: cash });
     }
     return rows;
   }
@@ -363,9 +406,35 @@
   const sumAmounts = (list) => (list || []).reduce((s, u) => s + (Number(u.amount) || 0), 0);
   const hasContent = (u) => Boolean(String((u && u.item) || '').trim()) || Number(u && u.amount) > 0;
 
+  /**
+   * עלויות הקמה שנשאלות בשדה נפרד ולא ברשימה החופשית (סעיף 13):
+   * הוצאות לפני הפתיחה ופיקדון או ערבות לשכירות. שתיהן יציאת מזומן חד-פעמית לפני
+   * הפתיחה, ולכן הן חלק מעלויות ההקמה ומופיעות בטבלת השימושים כמו כל פריט אחר.
+   * שורות עם 0 לא מוצגות בכלל, כדי שלא לנפח את הטבלה למי שלא רלוונטי לו.
+   */
+  const SETUP_EXTRA_FIELDS = [
+    { key: 'preOpenCosts', item: 'הוצאות לפני הפתיחה (שכירות בתקופת ההקמה, רישוי ואגרות)' },
+    { key: 'deposit', item: 'פיקדון או ערבות לשכירות' },
+  ];
+  function setupExtras(plan) {
+    const st = (plan && plan.startup) || {};
+    return SETUP_EXTRA_FIELDS
+      .map((f) => ({ item: f.item, amount: Math.max(0, Number(st[f.key]) || 0), type: 'capex', key: f.key }))
+      .filter((u) => u.amount > 0);
+  }
+
+  /** המע"מ על רכישת הציוד – יוצא בחודש 1 וחוזר כעבור חודשיים. לא חלק מהשימושים */
+  function equipmentVat(plan) {
+    return Math.max(0, Number(plan && plan.startup && plan.startup.equipmentVat) || 0);
+  }
+  /** הצעת ברירת מחדל למע"מ על הציוד: השיעור הקבוע על סך עלויות ההקמה שפורטו ברשימה */
+  function suggestedEquipmentVat(plan) {
+    return Math.round(sumAmounts(plan && plan.startup && plan.startup.setupCosts) * TAX.vatRatePct / 100);
+  }
+
   /** סך עלויות ההקמה שהמשתמש פירט בשלב "הקמת העסק" – מקור האמת להשקעה בעסק בהקמה */
   function setupCostsTotal(plan) {
-    return sumAmounts(plan && plan.startup && plan.startup.setupCosts);
+    return sumAmounts(plan && plan.startup && plan.startup.setupCosts) + sumAmounts(setupExtras(plan));
   }
 
   /** מקורות המימון: הלוואה ועוד הון עצמי (בעסק פועל אין הון עצמי, ולכן זה סכום ההלוואה) */
@@ -385,9 +454,14 @@
    * עסק פועל: הרשימה שהמשתמש הזין בשלב ההלוואה, כמו קודם.
    */
   function planUses(plan) {
-    if (!setupDrivesUses(plan)) return ((plan && plan.loan && plan.loan.uses) || []).filter(hasContent);
+    // סעיף 22: שם הפריט מנוקה כאן, במקום אחד, כדי שכל הטבלאות (ובממשק) יציגו אותו זהה
+    if (!setupDrivesUses(plan)) {
+      return ((plan && plan.loan && plan.loan.uses) || []).filter(hasContent)
+        .map((u) => ({ ...u, item: tidyLabel(u.item) }));
+    }
     const items = (plan.startup.setupCosts || []).filter(hasContent)
-      .map((u) => ({ item: u.item, amount: Number(u.amount) || 0, type: 'capex' }));
+      .map((u) => ({ item: tidyLabel(u.item), amount: Number(u.amount) || 0, type: 'capex' }))
+      .concat(setupExtras(plan).map((u) => ({ item: u.item, amount: u.amount, type: 'capex' })));
     const working = sourcesTotal(plan) - setupCostsTotal(plan);
     if (working > 0.5) items.push({ item: 'הון חוזר – סחורה, מלאי והוצאות שוטפות בתחילת הדרך', amount: working, type: 'working' });
     return items;
@@ -398,6 +472,19 @@
   function investmentTotal(plan) {
     if (setupDrivesUses(plan)) return setupCostsTotal(plan);
     return sumAmounts(((plan && plan.loan && plan.loan.uses) || []).filter((u) => u.type === 'capex'));
+  }
+
+  /**
+   * סעיף 22 – ניקוי כותרת שורה שהמשתמש הזין. כותרת שורה אינה משפט, ולכן נקודתיים
+   * או נקודה בסופה מיותרים במסמך: "רכישת ציוד ומכונות קפה:" → "רכישת ציוד ומכונות קפה".
+   * נוגעים רק ברווחים ובפיסוק שבסוף המחרוזת – אף אות אינה נמחקת (סעיף 23), ואם
+   * אחרי הניקוי לא נשאר תוכן, מחזירים את המקור כדי לא לאבד מה שהמשתמש כתב.
+   */
+  const TRAILING_PUNCT = /[\s.:;,־–-]+$/;
+  function tidyLabel(s) {
+    const base = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    const out = base.replace(TRAILING_PUNCT, '');
+    return out || base;
   }
 
   /** שם פריט להשוואה: בלי רווחים כפולים ובלי פיסוק בסוף */
@@ -492,9 +579,11 @@
     };
     const years = forecast(f, schedule);
     const uses = planUses(plan);
+    const vat = isNew ? equipmentVat(plan) : 0;
     const cash = cashflow(f, plan.loan.amount, uses, schedule, equityInflow(plan), {
       capex: investmentTotal(plan),
       monthlyTax: years[0].tax / 12,
+      vat: { amount: vat, refundMonth: 1 + TAX.vatRefundMonths },
     });
     const minDscr = Math.min(...years.map((y) => y.dscr));
     const firstFull = schedule.find((r) => r.principal > 0);
@@ -505,6 +594,7 @@
       sourcesTotal: sourcesTotal(plan),
       setupTotal: setupCostsTotal(plan),
       investment: investmentTotal(plan),
+      vat: { amount: vat, refundMonth: 1 + TAX.vatRefundMonths },
       monthlyTax: years[0].tax / 12,
       monthlyPayment: firstFull ? firstFull.payment : 0,
       graceInterest: plan.loan.graceMonths > 0 ? schedule[0].payment : 0,
@@ -513,7 +603,9 @@
       negativeMonths: cash.filter((c) => c.closing < 0).map((c) => c.month),
       cushion: cashCushion(cash, f),
       warnings: validatePlan(plan),
+      conflicts: conflictWarnings(plan),
     };
+    res.assumptions = assumptionWarnings(plan);
     res.checks = integrityChecks(plan, res);
     res.blocking = res.checks.filter((c) => !c.ok);
     return res;
@@ -522,8 +614,11 @@
   function ils(n) {
     return new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 }).format(Math.round(n || 0));
   }
-  function num(n) {
-    return new Intl.NumberFormat('he-IL', { maximumFractionDigits: 0 }).format(Math.round(n || 0));
+  /** מספר בעברית. d = ספרות אחרי הנקודה (ברירת מחדל: שלם), כמו בשכבת התצוגה */
+  function num(n, d = 0) {
+    const v = Number.isFinite(Number(n)) ? Number(n) : 0;
+    return new Intl.NumberFormat('he-IL', { maximumFractionDigits: d, minimumFractionDigits: d })
+      .format(d > 0 ? v : Math.round(v));
   }
 
   const MINUS = /[-−‒–]/; // מינוס רגיל, וגם מינוסים "טיפוגרפיים" שמגיעים מהדבקה
@@ -580,17 +675,51 @@
   }
 
   /**
+   * היתרה הנמוכה ביותר במסלול התזרים שהועבר. מקבלת שורות תזרים, אובייקט cushion
+   * או מספר, ומחזירה null כשאין מסלול תזרים להסיק ממנו.
+   */
+  function minClosingBalance(cashOrCushion) {
+    const x = cashOrCushion;
+    if (Array.isArray(x)) {
+      return x.length ? Math.min(...x.map((r) => Number(r && r.closing) || 0)) : null;
+    }
+    if (x && typeof x === 'object') {
+      return Number.isFinite(Number(x.min)) ? Number(x.min) : null;
+    }
+    return Number.isFinite(Number(x)) ? Number(x) : null;
+  }
+
+  /**
+   * כמה מההון החוזר עוד קיים בפועל בחשבון בנקודה הקשה ביותר של התזרים.
+   * ההון החוזר אינו כסף נוסף מעל התזרים: הוא נכנס לחשבון בחודש 1 יחד עם ההלוואה
+   * וההון העצמי, ולכן היתרה הנמוכה ביותר בתזרים היא מה שבאמת נשאר ממנו. אם היתרה
+   * ירדה לאפס או למינוס, הכסף כבר נוצל, ואסור להציג אותו לבנק כמקור גישור נוסף
+   * (ממצא QA סבב 5, באג חוסם 1).
+   * fallbackWhenUnknown – מה להחזיר כשלא הועבר מסלול תזרים בכלל.
+   */
+  function unusedWorkingCapital(workingCapital, cashOrCushion, fallbackWhenUnknown) {
+    const wc = Math.max(0, Number(workingCapital) || 0);
+    const min = minClosingBalance(cashOrCushion);
+    if (min == null) return Math.max(0, Math.min(wc, Number(fallbackWhenUnknown) || 0));
+    return Math.max(0, Math.min(wc, min));
+  }
+
+  /**
    * ניסוח הגישור על חודשי המינוס, בפרק הסיכונים שבמסמך.
    * עסק פועל – יש לו מסגרת אשראי קיימת, וזו הצהרה נכונה.
    * עסק בהקמה – אין לו מסגרת אשראי, ולא שאלנו אותו על כך; אסור להצהיר לבנק על
-   * עובדה שלא קיימת (ממצא QA סבב 4, באג לא-חוסם 1). מפנים להון החוזר שכבר במסמך.
+   * עובדה שלא קיימת (ממצא QA סבב 4, באג לא-חוסם 1).
+   * ההפניה להון החוזר נעשית רק אם הוא באמת עוד קיים בחשבון באותה נקודה: המשפט
+   * הזה מודפס דווקא כשהתזרים נכנס למינוס, ובמינוס ההון החוזר שנכנס בחודש 1 כבר
+   * נוצל – ולכן ברירת המחדל (בלי מסלול תזרים) היא לא להפנות אליו כלל
+   * (ממצא QA סבב 5, באג חוסם 1).
    */
-  function bridgeText(isNew, workingCapital) {
+  function bridgeText(isNew, workingCapital, cashOrCushion) {
     if (!isNew) return 'העסק יגשר על כך באמצעות מסגרת אשראי קיימת או דחיית חלק מההשקעות.';
-    const wc = Number(workingCapital) || 0;
-    return wc > 0.5
-      ? `הגישור ייעשה מתוך ההון החוזר שבמקורות ובשימושים (${ils(wc)}), ובמידת הצורך גם בדחיית חלק מההשקעות, בהוספת חודשי גרייס או בהגדלת ההון העצמי.`
-      : 'הגישור ייעשה בדחיית חלק מההשקעות, בהוספת חודשי גרייס או בהגדלת ההון העצמי לפני הפתיחה.';
+    const available = unusedWorkingCapital(workingCapital, cashOrCushion, 0);
+    return available > 0.5
+      ? `הגישור ייעשה מתוך ההון החוזר שנותר בחשבון באותם חודשים (${ils(available)}), ובמידת הצורך גם בדחיית חלק מההשקעות, בהוספת חודשי גרייס או בהגדלת ההון העצמי.`
+      : 'הגישור ייעשה בדחיית חלק מההשקעות, בהוספת חודשי גרייס להלוואה, בהקטנת משיכת הבעלים בחודשים הראשונים או בהגדלת ההון העצמי לפני הפתיחה.';
   }
 
   /**
@@ -599,16 +728,643 @@
    * עסק פועל – יש לו חשבון פעיל ומסגרת אשראי, וזו הצהרה נכונה.
    * עסק בהקמה – אין לו מסגרת אשראי ולא שאלנו אותו עליה; מפנים להון החוזר האמיתי
    * שכבר מוצג במקורות ובשימושים. אותה משפחת ממצאים של bridgeText (QA סבב 4).
+   * המשפט הזה מודפס רק כשהיתרה בתזרים עדיין חיובית (level === 'warn'), כלומר ההון
+   * החוזר אכן עוד בחשבון, והמשפט מתאר את ייעודו – ולכן הוא לא מושפע מבאג חוסם 1
+   * של סבב QA 5, שנוגע לניסוח שמודפס דווקא בחודשי מינוס (bridgeText).
    */
-  function thinCushionText(isNew, workingCapital) {
+  function thinCushionText(isNew, workingCapital, cashOrCushion) {
     if (!isNew) return 'העסק ישמור על מסגרת אשראי זמינה ויתאים את קצב ההשקעות לתקבולים בפועל.';
-    const wc = Number(workingCapital) || 0;
+    const wc = unusedWorkingCapital(workingCapital, cashOrCushion, workingCapital);
     return wc > 0.5
       ? `ההון החוזר שבמקורות ובשימושים (${ils(wc)}) נועד בדיוק לחודשים האלה, והעסק יתאים את קצב ההשקעות לתקבולים בפועל.`
       : 'העסק יתאים את קצב ההשקעות לתקבולים בפועל, ובמידת הצורך יוסיף חודשי גרייס או הון עצמי לפני הפתיחה.';
   }
 
-  const api = { FUND, TRACKS, AFFORD, TAX, maxLoan, spitzerPayment, amortization, debtByYear, rampFactor, salesLevel, bracketTax, nationalInsurance, taxFor, forecast, cashflow, dscrLevel, affordLevel, loanForPayment, roundAmount, repaymentOptions, equityShare, validatePlan, isNewBusiness, equityInflow, setupCostsTotal, sourcesTotal, planUses, usesTotal, investmentTotal, integrityChecks, integrityFailures, cashCushion, computePlan, ils, parseAmount, moneyText, profitText, negativeMonthsText, workingCapitalNote, workingCapitalTotal, bridgeText, thinCushionText };
+  // ---------- גל ב', סעיפים 6–15: לוגיקה ותוכן ----------
+
+  /**
+   * סעיף 6 – התקציר הציג רק את שנה 2, וזה נקרא כהצגת הצד היפה.
+   * המשפט מציג את שתי השנים: שנה 1 (עם ההתחלה ההדרגתית) ואחריה שנה 2.
+   */
+  function outlookText(years) {
+    const list = years || [];
+    const y1 = list[0];
+    const y2 = list[1];
+    if (!y1) return '';
+    const first = `לפי התחזית, בשנה הראשונה המחזור צפוי להסתכם ב-${ils(y1.revenue)}, ובשורה התפעולית צפוי ${profitText(y1.ebitda)}`;
+    if (!y2) return `${first}.`;
+    return `${first}. בשנה השנייה, בקצב פעילות מלא, המחזור צפוי להגיע ל-${ils(y2.revenue)} ובשורה התפעולית ${profitText(y2.ebitda)}.`;
+  }
+
+  /**
+   * סעיף 7 – "רווח תפעולי (לפני פחת)" הופיע בלי שורת פחת. השורה נקראת מעכשיו
+   * "רווח תפעולי", והערה אחת מסבירה שהפחת לא נכלל ומה המשמעות.
+   */
+  const DEPRECIATION_NOTE = 'התחזית אינה כוללת הוצאות פחת. הפחת הוא הוצאה חשבונאית שאינה יציאת מזומן, והוא נקבע בפועל לפי סוג הנכסים ותקופת הפחת שרואה החשבון קובע. אילו נרשם פחת, הרווח לפני מס והמס המשוער היו נמוכים יותר – כלומר הערכת המס שבטבלה שמרנית. התזרים שבפרק 7 אינו מושפע מכך.';
+
+  /**
+   * סעיף 8 – משיכת הבעלים מופיעה בתזרים ובחישוב יכולת ההחזר אך לא ברו"ה.
+   * זה נכון אצל עוסק מורשה, וצריך הערת שוליים שמסבירה את זה לקורא בבנק.
+   */
+  function ownerDrawNote(entity, annualDraw) {
+    const d = Math.max(0, Number(annualDraw) || 0);
+    if (!(d > 0)) return '';
+    const base = `משיכת הבעלים (${ils(d)} בשנה) אינה מופיעה בדוח רווח והפסד, אלא בתזרים המזומנים שבפרק 7 ובחישוב יכולת ההחזר שבפרק 9.`;
+    if (entity === 'company') {
+      return `${base} בחברה בע"מ שכר הבעלים נרשם בדרך כלל כהוצאת שכר בדוח, ומשפיע גם על המס; כאן הוא מוצג כמשיכה בלבד, ולכן הרווח הנקי שבטבלה גבוה מהסכום שנשאר בעסק בפועל. יש לאמת את אופן הרישום מול רואה החשבון.`;
+    }
+    return `${base} אצל עוסק מורשה ושותפות זו ההצגה המקובלת: המשיכה אינה הוצאה מוכרת אלא חלוקה של הרווח לבעלים, והמס מחושב על הרווח לפני המשיכה.`;
+  }
+
+  /**
+   * סעיף 10 – במקום הערה מילולית על הפרש שלא פורט, טבלת התאמה פשוטה:
+   * מקורות המימון מול עלויות ההקמה ועוד ההון החוזר.
+   */
+  function reconciliation(plan) {
+    const loan = Math.max(0, Number(plan && plan.loan && plan.loan.amount) || 0);
+    const equity = equityInflow(plan);
+    const items = planUses(plan);
+    const capex = sumAmounts(items.filter((u) => u.type !== 'working'));
+    const working = sumAmounts(items.filter((u) => u.type === 'working'));
+    const sources = [
+      { label: 'הלוואה מהקרן', amount: loan },
+      { label: 'הון עצמי של הבעלים', amount: equity },
+    ];
+    const uses = [
+      { label: 'עלויות הקמה חד-פעמיות', amount: capex },
+      { label: 'הון חוזר לתחילת הפעילות', amount: working },
+    ];
+    const sourcesSum = sources.reduce((s, r) => s + r.amount, 0);
+    const usesSum = uses.reduce((s, r) => s + r.amount, 0);
+    return { sources, uses, sourcesTotal: sourcesSum, usesTotal: usesSum, diff: sourcesSum - usesSum, balanced: Math.abs(sourcesSum - usesSum) <= 1 };
+  }
+
+  /**
+   * סעיף 11 – טקסט חופשי שסותר את המסלול שנבחר.
+   * עסק בהקמה שכותב "הרחבת ההיצע" מתאר עסק שכבר פועל, ולהפך. האזהרה מוצגת
+   * בממשק בשלב ההזנה (לא במסמך), ואינה חוסמת – המשתמש מחליט.
+   */
+  const CONFLICT_FIELDS = [
+    { key: 'business.description', label: 'תיאור העסק' },
+    { key: 'loan.purpose', label: 'מה תעשו עם הכסף' },
+    { key: 'owner.experience', label: 'הניסיון שלכם בתחום' },
+    { key: 'market.customers', label: 'מי הלקוחות שלכם' },
+    { key: 'market.advantage', label: 'למה לקוחות בוחרים בכם' },
+  ];
+  const NEW_CONFLICT_PATTERNS = [
+    /[להבומ]?הרחב(?:ת|ה|ות)|להרחיב|נרחיב/,
+    /הגדלת ה(מחזור|ייצור|הכנסות|פעילות)|להגדיל את ה(מחזור|ייצור|פעילות)/,
+    /הלקוחות הקיימים|לקוחות קיימים|הסניף הקיים|הקיים שלנו/,
+    /בשנה שעברה|בשנים האחרונות|מאז שפתחנו|מחזור נוכחי|המחזור הנוכחי|עד היום מכרנו/,
+  ];
+  const EXISTING_CONFLICT_PATTERNS = [
+    /טרם נפתח|עוד לא נפתח|לפני הפתיחה|עסק חדש שאנחנו|כשנפתח|עם הפתיחה/,
+  ];
+  function matchIn(text, patterns) {
+    const s = String(text || '');
+    for (const re of patterns) {
+      const m = s.match(re);
+      if (m) return m[0];
+    }
+    return '';
+  }
+  function conflictWarnings(plan) {
+    const p = plan || {};
+    const isNew = isNewBusiness(p);
+    const patterns = isNew ? NEW_CONFLICT_PATTERNS : EXISTING_CONFLICT_PATTERNS;
+    const out = [];
+    CONFLICT_FIELDS.forEach((f) => {
+      const value = f.key.split('.').reduce((a, k) => (a == null ? a : a[k]), p);
+      const phrase = matchIn(value, patterns);
+      if (!phrase) return;
+      out.push({
+        key: f.key,
+        label: f.label,
+        phrase,
+        text: isNew
+          ? `בשדה "${f.label}" כתוב "${phrase}" – ניסוח שמתאים לעסק שכבר פועל, בעוד שסימנתם שהעסק עוד לא נפתח. גוף מממן שקורא את שני הדברים יחד רואה סתירה. כדאי לנסח מחדש, או לחזור ולבחור "העסק כבר פועל".`
+          : `בשדה "${f.label}" כתוב "${phrase}" – ניסוח שמתאים לעסק שעוד לא נפתח, בעוד שסימנתם שהעסק כבר פועל. כדאי לנסח מחדש, או לחזור ולבחור "עסק חדש שעוד לא נפתח".`,
+      });
+    });
+    return out;
+  }
+
+  /**
+   * סעיף 12 – אזהרות סבירות על ההנחות. הספים קבועים כאן, במקום אחד, ולא מפוזרים
+   * בקוד: רווח תפעולי גבוה, הגעה מהירה מדי לקצב מלא, ומחזור גבוה לעובד.
+   * האזהרות מוצגות בממשק בלבד, ואינן חוסמות.
+   */
+  const ASSUMPTIONS = { ebitdaPct: 35, rampMonths: 3, salesPerWorker: 600000 };
+
+  /** שיעור הרווח התפעולי בקצב מלא (בלי השפעת ההתחלה ההדרגתית ובלי מימון ומס) */
+  function operatingMarginPct(f) {
+    const sales = Math.max(0, Number(f && f.annualSales) || 0);
+    if (!(sales > 0)) return null;
+    const cogs = sales * (Number(f.cogsPct) || 0) / 100;
+    const fixed = (Number(f.monthlyFixed) || 0) * 12;
+    const salaries = (Number(f.monthlySalaries) || 0) * 12;
+    return ((sales - cogs - fixed - salaries) / sales) * 100;
+  }
+
+  function assumptionWarnings(plan) {
+    const p = plan || {};
+    const f = p.forecast || {};
+    const b = p.business || {};
+    const isNew = isNewBusiness(p);
+    const out = [];
+    const margin = operatingMarginPct(f);
+    if (margin != null && margin > ASSUMPTIONS.ebitdaPct) {
+      out.push({
+        code: 'margin',
+        value: margin,
+        text: `לפי ההנחות שהזנתם, מכל 100 ₪ מכירה נשארים כ-${num(margin)} ₪ רווח תפעולי (מעל ${num(ASSUMPTIONS.ebitdaPct)} ₪, שזה גבוה לרוב העסקים). כדאי לבדוק שוב את עלות הסחורה, את ההוצאות הקבועות ואת השכר – גוף מממן שיראה שיעור כזה יבקש הסבר.`,
+      });
+    }
+    if (isNew && (Number(f.rampMonths) || 0) < ASSUMPTIONS.rampMonths) {
+      out.push({
+        code: 'ramp',
+        value: Number(f.rampMonths) || 0,
+        text: `הנחתם שהעסק יגיע לקצב המכירות המלא תוך ${(Number(f.rampMonths) || 0) === 0 ? 'מיד עם הפתיחה' : `${num(f.rampMonths)} חודשים`}. בעסק חדש מקובל להניח לפחות ${num(ASSUMPTIONS.rampMonths)} חודשים עד קצב מלא. הנחה מהירה מדי מייפה את התזרים בחודשים הראשונים, שהם בדיוק החודשים הקשים.`,
+      });
+    }
+    const workers = Math.max(0, Number(b.employees) || 0) + 1; // הבעלים נספר גם הוא
+    const perWorker = (Number(f.annualSales) || 0) / workers;
+    if (perWorker > ASSUMPTIONS.salesPerWorker) {
+      out.push({
+        code: 'perWorker',
+        value: perWorker,
+        text: `המחזור המתוכנן הוא כ-${ils(perWorker)} לשנה לכל עובד (כולל אתכם), מעל ${ils(ASSUMPTIONS.salesPerWorker)} שנחשבים גבוהים. אם זה נכון – כדאי להסביר במסמך איך מגיעים לזה; אם לא – כדאי לבדוק שוב את תחזית המכירות או את מספר העובדים.`,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * סעיף 14 – מחזור שנבנה מלמטה: לקוחות ביום × קנייה ממוצעת × ימי פעילות בחודש.
+   * מחזיר גם את החישוב עצמו, כדי שאפשר יהיה להציג אותו במסמך ולא רק את התוצאה.
+   */
+  function bottomUpSales(f) {
+    const customersPerDay = Math.max(0, Number(f && f.customersPerDay) || 0);
+    const avgTicket = Math.max(0, Number(f && f.avgTicket) || 0);
+    const daysPerMonth = Math.max(0, Number(f && f.daysPerMonth) || 0);
+    const monthly = customersPerDay * avgTicket * daysPerMonth;
+    return { customersPerDay, avgTicket, daysPerMonth, monthly, annual: Math.round(monthly * 12), ok: customersPerDay > 0 && avgTicket > 0 && daysPerMonth > 0 };
+  }
+  function bottomUpText(f) {
+    const b = bottomUpSales(f);
+    if (!b.ok) return '';
+    return `המחזור נבנה מלמטה: ${num(b.customersPerDay)} לקוחות ביום × ${ils(b.avgTicket)} קנייה ממוצעת × ${num(b.daysPerMonth)} ימי פעילות בחודש = ${ils(b.monthly)} בחודש, ${ils(b.annual)} בשנה.`;
+  }
+  /** האם התוכנית בנויה על חישוב מלמטה ולא על סכום שנתי שהוזן ישירות */
+  function usesBottomUp(plan) {
+    const f = (plan && plan.forecast) || {};
+    return f.salesModel === 'bottomUp' && bottomUpSales(f).ok;
+  }
+
+  /**
+   * סעיף 15 – פרקי הבעלים והשוק היו דלים. מהשאלות המונחות בממשק (ניסיון, השכלה,
+   * מתחרים, תמחור) נבנים כאן פרקים מלאים. הטקסט חוזר מפוצל (כותרת/פתיח/גוף)
+   * כדי שהמסמך יוכל לברוח מהצגה של טקסט משתמש בלי escaping.
+   */
+  const clean = (s) => String(s == null ? '' : s).trim();
+  function ownerParagraphs(plan) {
+    const p = plan || {};
+    const o = p.owner || {};
+    const b = p.business || {};
+    const isNew = isNewBusiness(p);
+    // שם הבעלים ושם העסק הם כותרות ולא משפטים: סעיף 22 מנקה פיסוק מיותר בסופם,
+    // כדי שלא יתקבל "בידי ישראל ישראלי.." בתוך המשפט
+    const name = tidyLabel(o.name);
+    const out = [];
+    const bizName = tidyLabel(b.name) || 'העסק';
+    if (name) out.push({ lead: '', text: `הבעלות והניהול של ${bizName} בידי ${name}.` });
+    if (clean(o.experience)) out.push({ lead: 'ניסיון מקצועי:', text: clean(o.experience) });
+    if (clean(o.education)) out.push({ lead: 'השכלה והכשרה:', text: clean(o.education) });
+    if (isNew) {
+      out.push({ lead: '', text: 'העסק טרם נפתח, ולכן אין לו דוחות כספיים היסטוריים. הניסיון וההכשרה של הבעלים הם הבסיס המרכזי להערכת היכולת להפעיל את העסק ולעמוד בהחזרים.' });
+    }
+    return out;
+  }
+  function marketSections(plan) {
+    const m = (plan && plan.market) || {};
+    const out = [];
+    if (clean(m.customers)) out.push({ heading: 'לקוחות', texts: [clean(m.customers)] });
+    if (clean(m.competitors)) out.push({ heading: 'מתחרים', texts: [clean(m.competitors)] });
+    if (clean(m.pricing)) out.push({ heading: 'תמחור', texts: [clean(m.pricing)] });
+    if (clean(m.advantage)) out.push({ heading: 'היתרון התחרותי', texts: [clean(m.advantage)] });
+    return out;
+  }
+
+  // ---------- גל ב', סעיפים 16–21: הצגה ----------
+
+  /**
+   * סעיף 21 – שכבת הטקסט ב-PDF. בעברית, מספר או אחוז שיושב בתוך משפט גורר אליו את
+   * הפיסוק שלידו, וכך בהעתק-הדבק מהקובץ מתקבל "ל5- שנים" או "ביוני .2027".
+   * הפתרון התקני: לעטוף כל מספר בבידוד כיווניות (LRI…PDI, U+2066/U+2069). התווים
+   * האלה אינם נראים, הם נשמרים בהעתקה ובקורא מסך, והם מונעים מהפיסוק "להידבק" למספר.
+   * הפונקציה אידמפוטנטית: בידודים קיימים מוסרים לפני העטיפה מחדש.
+   * חשוב: מפעילים אותה על טקסט בלבד, לפני ה-escaping ל-HTML (אחרת היא תיכנס לתוך
+   * ישויות כמו &#39;), ולא על מחרוזת שכבר מכילה תגיות.
+   */
+  const LRI = '⁦';
+  const PDI = '⁩';
+  const ISOLATES = /[⁦⁧⁨⁩]/g;
+  // מספר עם מפרידי אלפים ונקודה עשרונית, ואחריו אחוז אם יש. תאריך (24.9.2027) נתפס כיחידה אחת.
+  const NUMBER_RUN = /\d+(?:[.,:/]\d+)*(?:\s?%)?/g;
+  // מספר שלילי: המינוס נכנס לתוך הבידוד רק כשהוא באמת סימן של המספר (בתחילת מקטע,
+  // אחרי רווח, סוגר או סימן כיווניות) – ולא מקף עברי כמו ב"ל-5 שנים".
+  const SIGNED_RUN = /(^|[\s(‎‏])([-−])(\d+(?:[.,:/]\d+)*(?:\s?%)?)/g;
+  const WRAPPED = /(⁦[^⁩]*⁩)/;
+  function ltr(s) {
+    const t = String(s == null ? '' : s).replace(ISOLATES, '');
+    return t ? LRI + t + PDI : '';
+  }
+  function bidiText(s) {
+    const clean = String(s == null ? '' : s).replace(ISOLATES, '');
+    const signed = clean.replace(SIGNED_RUN, (m, pre, sign, body) => pre + LRI + sign + body + PDI);
+    // שאר המספרים נעטפים גם הם, בלי להיכנס שוב לבידודים שכבר נוצרו
+    return signed.split(WRAPPED).map((part, i) => (i % 2 ? part : part.replace(NUMBER_RUN, (m) => LRI + m + PDI))).join('');
+  }
+  /** טקסט נקי מבידודים – לבדיקות ולהשוואות */
+  function stripBidi(s) { return String(s == null ? '' : s).replace(ISOLATES, ''); }
+
+  /**
+   * סעיף 20 – יחידות אחידות: הסימן ₪ מופיע בכותרת הטבלה בלבד, והתאים מציגים מספר נקי.
+   * הכיתוב הזה הוא הכותרת שמופיעה מעל כל טבלת כספים במסמך.
+   */
+  const MONEY_CAPTION = 'כל הסכומים בטבלה בשקלים (₪), מעוגלים לשקל';
+
+  /**
+   * סעיף 16 – חודש האיזון: החודש הראשון שבו ההכנסות מכסות את ההוצאות השוטפות
+   * (עלות המכר, הוצאות קבועות ושכר). זה איזון תפעולי, בלי ההשקעה החד-פעמית ובלי
+   * החזר ההלוואה – ולכן הוא נמדד על שורות התזרים ולא על היתרה בבנק.
+   * מחזיר null כשהאיזון לא מושג בשנה הראשונה.
+   */
+  function breakEvenMonth(rows) {
+    const hit = (rows || []).find((r) => (r.revenue - r.cogs - r.fixed - r.salaries) >= 0);
+    return hit ? hit.month : null;
+  }
+
+  /**
+   * סעיף 16 – כרטיסי המדדים בראש הדוח: חמישה מספרים שגוף מממן מחפש קודם כול.
+   * כל כרטיס מחזיר גם הסבר בשפה פשוטה (note), כדי שלא יופיע מונח מקצועי בלי פירוש,
+   * וגם דירוג (level) כדי שהתצוגה תצבע אותו: ok / warn / risk / plain.
+   */
+  function headlineMetrics(plan, result) {
+    const p = plan || {};
+    const res = result || computePlan(p);
+    const loan = Math.max(0, Number(p.loan && p.loan.amount) || 0);
+    const equity = equityInflow(p);
+    const share = equityShare(equity, loan);
+    const cushion = res.cushion || { min: 0, month: 1, level: 'ok' };
+    const be = breakEvenMonth(res.cash);
+    const rating = res.rating || dscrLevel(res.minDscr);
+    const years = Number(p.loan && p.loan.years) || 0;
+    const cards = [];
+    cards.push({
+      key: 'loan', label: 'סכום מבוקש', value: ils(loan), level: 'plain',
+      note: `הלוואה ל-${years} שנים, בהחזר חודשי של ${ils(res.monthlyPayment)}.`,
+    });
+    // בעסק פועל לא נשאלת שאלת ההון העצמי (הוא כבר בדוחות הכספיים), ולכן אין להציג
+    // "0%" ואזהרה על משהו שלא נשאל – הכרטיס מסביר מה כן מוצג.
+    const asksEquity = isNewBusiness(p);
+    cards.push(asksEquity && share
+      ? {
+        key: 'equity', label: 'חלק ההון העצמי', value: `${num(share.pct)}%`,
+        level: share.below ? 'warn' : 'ok',
+        note: `${ils(equity)} מתוך סך השקעה של ${ils(share.total)}. גופים מממנים נוהגים לצפות לכ-${num(AFFORD.minEquityPct)}% ומעלה.`,
+      }
+      : {
+        key: 'equity', label: 'חלק ההון העצמי', value: '—', level: 'plain',
+        note: asksEquity
+          ? 'התוכנית אינה כוללת הון עצמי של הבעלים; מלוא ההשקעה ממומנת בהלוואה.'
+          : 'העסק כבר פועל, וההון העצמי שלו מופיע בדוחות הכספיים. ההשקעה החדשה שבתוכנית ממומנת בהלוואה.',
+      });
+    cards.push({
+      key: 'dscr', label: 'יחס כיסוי חוב מינימלי',
+      value: Number.isFinite(res.minDscr) ? num(res.minDscr, 2) : '—',
+      level: rating.level,
+      note: 'כמה פעמים המזומן הפנוי מכסה את החזרי ההלוואה בשנה הקשה ביותר. 1.25 ומעלה נחשב טוב.',
+    });
+    cards.push({
+      key: 'cash', label: 'יתרת המזומן הנמוכה ביותר', value: ils(cushion.min), level: cushion.level,
+      note: `זו היתרה בחשבון בסוף חודש ${cushion.month}, החודש הנמוך ביותר בשנה הראשונה.`,
+    });
+    cards.push({
+      key: 'breakeven', label: 'חודש האיזון',
+      value: be ? `חודש ${num(be)}` : 'לא בשנה הראשונה',
+      level: be ? (be <= 6 ? 'ok' : 'warn') : 'risk',
+      note: be
+        ? 'החודש הראשון שבו ההכנסות מכסות את ההוצאות השוטפות (סחורה, הוצאות קבועות ושכר).'
+        : 'בשנה הראשונה ההכנסות עדיין אינן מכסות את ההוצאות השוטפות בשום חודש.',
+    });
+    return cards;
+  }
+
+  // ---------- סעיף 17: גרפים (גאומטריה טהורה, בלי ספריית צד שלישי) ----------
+
+  // padRight הוא המקום לסימוני הציר, שבעברית יושבים בצד ימין. הוא רחב מספיק
+  // למספר כמו "1,890,000" בגופן של התצוגה, כדי שהכיתוב לא ייחתך.
+  const CHART = { w: 720, h: 250, padTop: 16, padBottom: 34, padLeft: 12, padRight: 96 };
+  const r2 = (n) => Math.round(n * 100) / 100;
+
+  /** צעד "עגול" לסימוני הציר: 1, 2, 5 או 10 בכפולות של עשר */
+  function niceStep(range, count) {
+    const raw = Math.abs(range) / Math.max(1, count || 4);
+    if (!(raw > 0)) return 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return step * mag;
+  }
+
+  /** סקאלה שמכילה תמיד את האפס, כדי שגרף עם ערכים שליליים יציג קו אפס אמיתי */
+  function niceScale(values, count) {
+    const list = (values || []).map((v) => Number(v) || 0);
+    let min = Math.min(0, ...list);
+    let max = Math.max(0, ...list);
+    if (min === max) max = min + 1;
+    const step = niceStep(max - min, count || 4);
+    min = Math.floor(min / step) * step;
+    max = Math.ceil(max / step) * step;
+    const ticks = [];
+    for (let v = min; v <= max + step / 2; v += step) ticks.push(r2(v));
+    return { min, max, step, ticks };
+  }
+
+  function chartBox(opts) {
+    const o = Object.assign({}, CHART, opts || {});
+    return {
+      o,
+      left: o.padLeft,
+      right: o.w - o.padRight,   // בעברית סימוני הציר בצד ימין, ולכן השוליים הרחבים שם
+      top: o.padTop,
+      bottom: o.h - o.padBottom,
+    };
+  }
+
+  /**
+   * גרף קו: סדרה של {label, value}. הציר רץ מימין לשמאל (נקודה ראשונה בימין),
+   * כמו שקוראים עברית. מחזיר גאומטריה בלבד – ה-SVG עצמו נבנה בשכבת התצוגה.
+   */
+  function lineChartData(series, opts) {
+    const list = (series || []).map((p) => ({ label: String(p.label), value: Number(p.value) || 0 }));
+    const box = chartBox(opts);
+    const scale = niceScale(list.map((p) => p.value));
+    const span = scale.max - scale.min;
+    const y = (v) => r2(box.bottom - ((v - scale.min) / span) * (box.bottom - box.top));
+    const n = list.length;
+    const x = (i) => r2(n <= 1 ? (box.left + box.right) / 2 : box.right - (i * (box.right - box.left)) / (n - 1));
+    const points = list.map((p, i) => ({ label: p.label, value: p.value, x: x(i), y: y(p.value), negative: p.value < 0 }));
+    return {
+      w: box.o.w, h: box.o.h, min: scale.min, max: scale.max, step: scale.step,
+      points,
+      path: points.map((p, i) => `${i ? 'L' : 'M'}${p.x} ${p.y}`).join(' '),
+      zeroY: y(0),
+      ticks: scale.ticks.map((v) => ({ value: v, y: y(v), label: num(v) })),
+      axis: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+    };
+  }
+
+  /**
+   * גרף עמודות מקובצות: groups = [{label, bars:[{key,label,value}]}].
+   * גם כאן הקבוצה הראשונה בימין. עמודה שלילית יורדת מתחת לקו האפס.
+   */
+  function barChartData(groups, opts) {
+    const list = (groups || []).map((g) => ({ label: String(g.label), bars: (g.bars || []).map((b) => ({ key: b.key, label: b.label, value: Number(b.value) || 0 })) }));
+    const box = chartBox(opts);
+    const all = list.reduce((acc, g) => acc.concat(g.bars.map((b) => b.value)), []);
+    const scale = niceScale(all);
+    const span = scale.max - scale.min;
+    const y = (v) => r2(box.bottom - ((v - scale.min) / span) * (box.bottom - box.top));
+    const zeroY = y(0);
+    const gw = (box.right - box.left) / Math.max(1, list.length);
+    const maxBars = list.reduce((m, g) => Math.max(m, g.bars.length), 1);
+    const bw = r2((gw * 0.72) / maxBars);
+    const out = list.map((g, gi) => {
+      const gRight = box.right - gi * gw;               // מימין לשמאל
+      const gCenter = r2(gRight - gw / 2);
+      const startRight = gCenter + (g.bars.length * bw) / 2;
+      return {
+        label: g.label, x: gCenter, width: r2(gw),
+        bars: g.bars.map((b, bi) => {
+          const bx = r2(startRight - (bi + 1) * bw);
+          const by = Math.min(y(b.value), zeroY);
+          return { key: b.key, label: b.label, value: b.value, x: bx, y: r2(by), w: bw, h: r2(Math.abs(y(b.value) - zeroY)), negative: b.value < 0 };
+        }),
+      };
+    });
+    return {
+      w: box.o.w, h: box.o.h, min: scale.min, max: scale.max, step: scale.step, zeroY,
+      groups: out,
+      ticks: scale.ticks.map((v) => ({ value: v, y: y(v), label: num(v) })),
+      axis: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+    };
+  }
+
+  /** הנתונים לשני הגרפים שבמסמך (סעיף 17), מתוך תוצאת החישוב */
+  function cashLineSeries(res) {
+    return ((res && res.cash) || []).map((c) => ({ label: `חודש ${c.month}`, value: c.closing, month: c.month }));
+  }
+  function plBarGroups(res) {
+    return ((res && res.years) || []).map((yr) => ({
+      label: `שנה ${yr.year}`,
+      bars: [
+        { key: 'revenue', label: 'הכנסות', value: yr.revenue },
+        { key: 'ebitda', label: 'רווח תפעולי', value: yr.ebitda },
+        { key: 'net', label: 'רווח נקי', value: yr.net },
+      ],
+    }));
+  }
+
+  // ---------- סעיף 18: מבנה טבלת התזרים ----------
+
+  /**
+   * שורות התזרים מסודרות לשלוש קבוצות: תקבולים, תשלומים והשורה התחתונה.
+   * לכל קבוצה שורת ביניים ("סה"כ תקבולים" / "סה"כ תשלומים"), ואחריהן תזרים נטו
+   * ויתרת סגירה. שורה שכולה אפסים לא נכנסת בכלל (למשל מע"מ כשלא הוזן).
+   * sparse=true פירושו שבתצוגה מציגים "–" במקום 0 (שורה חד-פעמית כמו קבלת ההלוואה).
+   */
+  function cashflowSections(res, opts) {
+    const rows = (res && res.cash) || [];
+    const o = opts || {};
+    const entity = o.entity || 'osek';
+    const col = (key) => rows.map((r) => Number(r[key]) || 0);
+    const any = (values) => values.some((v) => Math.abs(v) > 0.5);
+    const mk = (key, label, values, sparse) => ({ key, label, values, sparse: !!sparse });
+    const inRows = [
+      mk('revenue', 'תקבולים ממכירות', col('revenue')),
+      mk('loanIn', 'קבלת ההלוואה', col('loanIn'), true),
+      mk('equityIn', 'הכנסת הון עצמי', col('equityIn'), true),
+      mk('vatIn', 'החזר מע"מ מרשות המסים', col('vatIn'), true),
+    ].filter((r) => any(r.values));
+    const outRows = [
+      mk('cogs', 'עלות המכר', col('cogs')),
+      mk('fixedSalaries', 'הוצאות קבועות ושכר', rows.map((r) => (Number(r.fixed) || 0) + (Number(r.salaries) || 0))),
+      mk('draw', 'משיכת בעלים', col('draw')),
+      mk('vatOut', 'מע"מ על רכישת הציוד', col('vatOut'), true),
+      mk('tax', entity === 'company' ? 'מס חברות' : 'מס הכנסה וביטוח לאומי', col('tax')),
+      mk('debt', 'החזר הלוואה', col('debt')),
+      mk('invest', 'השקעות', col('invest'), true),
+    ].filter((r) => any(r.values));
+    const sum = (list) => rows.map((_, i) => list.reduce((s, r) => s + r.values[i], 0));
+    const inTotal = sum(inRows);
+    const outTotal = sum(outRows);
+    return {
+      months: rows.map((r) => r.month),
+      opening: mk('opening', 'יתרת פתיחה', col('opening')),
+      inflows: { key: 'in', title: 'תקבולים (כסף שנכנס)', rows: inRows, total: mk('inTotal', 'סה"כ תקבולים', inTotal) },
+      outflows: { key: 'out', title: 'תשלומים (כסף שיוצא)', rows: outRows, total: mk('outTotal', 'סה"כ תשלומים', outTotal) },
+      net: mk('net', 'תזרים נטו בחודש', rows.map((_, i) => inTotal[i] - outTotal[i])),
+      closing: mk('closing', 'יתרת סגירה', col('closing')),
+    };
+  }
+
+  // ---------- סעיף 19: טבלת תרחישים ----------
+
+  const SCENARIOS = [
+    { key: 'base', pct: 0, label: 'תרחיש בסיס' },
+    { key: 'down10', pct: -10, label: 'ירידה של 10% במכירות' },
+    { key: 'down20', pct: -20, label: 'ירידה של 20% במכירות' },
+  ];
+
+  /** עותק של התוכנית שבו המכירות (וגם נקודת הפתיחה של עסק פועל) מוכפלות בפקטור */
+  function scenarioPlan(plan, pct) {
+    const factor = 1 + (Number(pct) || 0) / 100;
+    const p = JSON.parse(JSON.stringify(plan || {}));
+    p.forecast = p.forecast || {};
+    p.forecast.annualSales = Math.round((Number(p.forecast.annualSales) || 0) * factor);
+    if (p.history && Number(p.history.lastYearSales)) p.history.lastYearSales = Math.round(p.history.lastYearSales * factor);
+    if (Number(p.forecast.customersPerDay)) p.forecast.customersPerDay = (Number(p.forecast.customersPerDay) || 0) * factor;
+    return p;
+  }
+
+  /**
+   * שלושה תרחישים: בסיס, ‎-10% ו-‎-20% במכירות. ההוצאות הקבועות, השכר, ההלוואה
+   * וההחזרים נשארים כפי שהם – זו בדיוק הנקודה: מה קורה כשהמכירות מאכזבות.
+   * לכל תרחיש: הרווח התפעולי בשנה הראשונה, יחס כיסוי החוב הנמוך ביותר בשלוש השנים,
+   * והיתרה הנמוכה ביותר בתזרים השנה הראשונה.
+   */
+  function scenarios(plan) {
+    return SCENARIOS.map((s) => {
+      const res = computePlan(s.pct ? scenarioPlan(plan, s.pct) : plan);
+      const cushion = res.cushion || { min: 0, month: 1, level: 'ok' };
+      const rating = dscrLevel(res.minDscr);
+      return {
+        key: s.key, label: s.label, pct: s.pct,
+        revenue: res.years[0].revenue,
+        ebitda: res.years[0].ebitda,
+        net: res.years[0].net,
+        minDscr: res.minDscr,
+        dscrLevel: rating.level,
+        minCash: cushion.min,
+        minCashMonth: cushion.month,
+        negativeMonths: res.negativeMonths.length,
+        level: cushion.min < 0 || res.minDscr < 1 ? 'risk' : (rating.level === 'ok' && cushion.level === 'ok' ? 'ok' : 'warn'),
+      };
+    });
+  }
+
+  /** משפט שמסביר את הטבלה בשפה פשוטה, לפי מה שקרה בתרחיש הגרוע ביותר */
+  function scenarioNote(list) {
+    const rows = list || [];
+    const worst = rows[rows.length - 1];
+    if (!worst) return '';
+    const base = 'הטבלה בודקת מה קורה אם המכירות יהיו נמוכות מהתחזית, בעוד ההוצאות הקבועות, השכר והחזרי ההלוואה נשארים כפי שהם. ';
+    if (worst.minCash < 0) {
+      return `${base}בתרחיש של ירידה של ${num(-worst.pct)}% במכירות החשבון נכנס למינוס (יתרה נמוכה של ${ils(worst.minCash)} בחודש ${worst.minCashMonth}), ולכן נדרש מרווח נוסף: הון חוזר גדול יותר, דחיית חלק מההשקעות או חודשי גרייס.`;
+    }
+    if (worst.minDscr < 1.25) {
+      return `${base}בתרחיש של ירידה של ${num(-worst.pct)}% במכירות יחס כיסוי החוב יורד ל-${num(worst.minDscr, 2)}, כלומר המרווח מעל ההחזרים מצטמצם. היתרה הנמוכה ביותר בחשבון נשארת חיובית (${ils(worst.minCash)}).`;
+    }
+    return `${base}גם בירידה של ${num(-worst.pct)}% במכירות יחס כיסוי החוב נשאר ${num(worst.minDscr, 2)} והיתרה הנמוכה ביותר בחשבון נשארת חיובית (${ils(worst.minCash)}).`;
+  }
+
+  // ---------- גל ב', סעיפים 22–24 ופסקת הביטחונות ----------
+
+  /**
+   * סעיף 24 – התווית "ותק: בהקמה" הייתה מעורפלת. במקומה "סטטוס", עם ערך שאומר
+   * במלים מה מצב העסק: "עסק בהקמה" מול "עסק פועל" ועוד הוותק בשנים.
+   * הערך נשאר קצר, כדי לא לשבור את רוחב טבלת העובדות במסמך.
+   */
+  function businessStatus(plan) {
+    const b = (plan && plan.business) || {};
+    if (isNewBusiness(plan)) return { label: 'סטטוס', value: 'עסק בהקמה', isNew: true, years: 0 };
+    const years = Math.max(0, Number(b.years) || 0);
+    const yearsText = years >= 2 ? `${num(years)} שנים` : (years === 1 ? 'שנה' : '');
+    return { label: 'סטטוס', value: yearsText ? `עסק פועל ${yearsText}` : 'עסק פועל', isNew: false, years };
+  }
+
+  /**
+   * אומדן הביטחונות הנדרשים, נגזר מסכום ההלוואה שהוזן בפועל:
+   * שיעור נמוך על החלק שעד התקרה, ושיעור גבוה על החלק שמעליה.
+   */
+  function collateralRequirement(amount) {
+    const loan = Math.max(0, Number(amount) || 0);
+    const lower = Math.min(loan, COLLATERAL.tierCap);
+    const upper = Math.max(0, loan - COLLATERAL.tierCap);
+    return {
+      loan,
+      lower, upper,
+      tiered: upper > 0,
+      amount: Math.round(lower * COLLATERAL.tierPct / 100 + upper * COLLATERAL.upperPct / 100),
+    };
+  }
+
+  /**
+   * פסקת הביטחונות והערבות במסמך שמוגש לבנק (החלטת מאיר, 24.09.2026).
+   * בסבב P1 הפסקה הוסרה מהמסמך כי היא פנתה למגיש ("לפי מה שהזנתם"). היא חוזרת
+   * כאן בגוף שלישי בלבד, ובכל משפט יש מקור: או חישוב מסכום ההלוואה שהוזן, או
+   * סכום שהוזן בפועל (הון עצמי, פיקדון), או קביעה על צורת ההתאגדות שנבחרה.
+   * אין כאן אמירה עובדתית על ביטחונות שהמשתמש לא הזין – הכלי אינו אוסף רשימת
+   * נכסים או ערבים, והמשפט האחרון אומר את זה במפורש.
+   */
+  const ENTITY_GUARANTEE = {
+    company: 'הבקשה מוגשת על ידי חברה בע"מ, שבה נכסי החברה מופרדים מנכסי הבעלים. לצד הביטחונות נהוג שהבנק מחתים את הבעלים על ערבות אישית למלוא ההלוואה.',
+    partnership: 'הבקשה מוגשת על ידי שותפות, והשותפים חבים בחובות העסק באופן אישי. נהוג שהבנק מחתים את השותפים על ערבות אישית למלוא ההלוואה.',
+    osek: 'הבקשה מוגשת על ידי עוסק מורשה, ואין הפרדה בין נכסי העסק לנכסי הבעלים: הבעלים חב בחוב באופן אישי, ונהוג שהבנק מחתים אותו גם על ערבות אישית למלוא ההלוואה.',
+  };
+  const COLLATERAL_SCOPE_NOTE = 'פירוט הנכסים והערבים שיוצעו כביטחון אינו חלק ממסמך זה, והוא מוגש לבנק בנפרד. היקף הביטחונות וסוגם נקבעים מול הבנק המלווה ומול הקרן, והסכום שלמעלה הוא אומדן לפי הכללים הנהוגים ולא התחייבות של אחד מהם.';
+  function collateralSection(plan) {
+    const p = plan || {};
+    const req = collateralRequirement(p.loan && p.loan.amount);
+    const paragraphs = [];
+    if (req.loan > 0) {
+      paragraphs.push(req.tiered
+        ? `על הלוואה בסך ${ils(req.loan)} נהוגה דרישת ביטחונות של כ-${num(COLLATERAL.tierPct)}% מהחלק שעד ${ils(COLLATERAL.tierCap)} וכ-${num(COLLATERAL.upperPct)}% מהחלק שמעליו – כ-${ils(req.amount)} – או ערב נוסף במקומם.`
+        : `על הלוואה בסך ${ils(req.loan)} נהוגה דרישת ביטחונות של כ-${num(COLLATERAL.tierPct)}% מסכום ההלוואה – כ-${ils(req.amount)} – או ערב נוסף במקומם.`);
+    }
+    const guarantee = ENTITY_GUARANTEE[(p.business && p.business.entity)] || ENTITY_GUARANTEE.osek;
+    paragraphs.push(guarantee);
+
+    // עובדות שנגזרות מסכומים שהוזנו בפועל. סכום שלא הוזן – אין עליו משפט.
+    const equity = equityInflow(p);
+    const share = equityShare(equity, p.loan && p.loan.amount);
+    if (equity > 0) {
+      paragraphs.push(share
+        ? `ההון העצמי שמעמידים הבעלים בבקשה זו הוא ${ils(equity)}, כ-${num(share.pct)}% מסך מקורות המימון (${ils(share.total)}).`
+        : `ההון העצמי שמעמידים הבעלים בבקשה זו הוא ${ils(equity)}.`);
+    }
+    const deposit = Math.max(0, Number(p.startup && p.startup.deposit) || 0);
+    if (deposit > 0) {
+      paragraphs.push(`בעלויות ההקמה נכלל פיקדון או ערבות לשכירות בסך ${ils(deposit)} לטובת בעל הנכס. הוא משמש את חוזה השכירות ואינו ביטחון להלוואה.`);
+    }
+    paragraphs.push(COLLATERAL_SCOPE_NOTE);
+    return { heading: 'ביטחונות וערבויות', paragraphs, requirement: req };
+  }
+
+  const api = { FUND, TRACKS, AFFORD, TAX, maxLoan, spitzerPayment, amortization, debtByYear, rampFactor, salesLevel, bracketTax, nationalInsurance, niDeductibleExpense, taxFor, forecast, cashflow, dscrLevel, affordLevel, loanForPayment, roundAmount, repaymentOptions, equityShare, validatePlan, isNewBusiness, equityInflow, setupCostsTotal, sourcesTotal, planUses, usesTotal, investmentTotal, integrityChecks, integrityFailures, cashCushion, computePlan, ils, parseAmount, moneyText, profitText, negativeMonthsText, workingCapitalNote, workingCapitalTotal, unusedWorkingCapital, bridgeText, thinCushionText,
+    // גל ב' (סעיפים 6–15)
+    outlookText, DEPRECIATION_NOTE, ownerDrawNote, reconciliation, conflictWarnings, CONFLICT_FIELDS,
+    ASSUMPTIONS, operatingMarginPct, assumptionWarnings, setupExtras, SETUP_EXTRA_FIELDS, equipmentVat,
+    suggestedEquipmentVat, bottomUpSales, bottomUpText, usesBottomUp, ownerParagraphs, marketSections,
+    // גל ב' (סעיפים 16–21): הצגה
+    headlineMetrics, breakEvenMonth, MONEY_CAPTION, ltr, bidiText, stripBidi, LRI, PDI,
+    CHART, niceStep, niceScale, lineChartData, barChartData, cashLineSeries, plBarGroups,
+    cashflowSections, SCENARIOS, scenarioPlan, scenarios, scenarioNote, num,
+    // גל ב' (סעיפים 22–24) ופסקת הביטחונות
+    tidyLabel, businessStatus, COLLATERAL, collateralRequirement, collateralSection,
+    ENTITY_GUARANTEE, COLLATERAL_SCOPE_NOTE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Engine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -107,12 +107,15 @@ test('טבלת היעד של מאיר (בלי שורת מס): 33,242 / 12,735 / 
   assert.equal(ROUND(rows[11].closing), 306409);
 });
 
-test('טבלת היעד המעודכנת (עם שורת המס): 22,616 / -8,518 / -13,402 / 178,894', () => {
+// הטבלה עם שורת המס עודכנה אחרי תיקון באג חוסם 2 של סבב QA 5: ביטוח לאומי לעצמאי
+// כולל מעכשיו גם דמי ביטוח בריאות, ולכן המס בשנה 1 עלה ב-18,518 ₪ וכל יתרת סגירה
+// ירדה ב-1,543 ₪ לחודש מצטבר. טבלת היעד המקורית של מאיר (בלי שורת מס) לא זזה.
+test('טבלת היעד המעודכנת (עם שורת המס): 21,073 / -11,604 / -18,031 / 160,376', () => {
   const res = E.computePlan(cafe());
-  assert.equal(ROUND(res.cash[0].closing), 22616);
-  assert.equal(ROUND(res.cash[1].closing), -8518);
-  assert.equal(ROUND(res.cash[2].closing), -13402);
-  assert.equal(ROUND(res.cash[11].closing), 178894);
+  assert.equal(ROUND(res.cash[0].closing), 21073);
+  assert.equal(ROUND(res.cash[1].closing), -11604);
+  assert.equal(ROUND(res.cash[2].closing), -18031);
+  assert.equal(ROUND(res.cash[11].closing), 160376);
   // הגשר בין שתי הטבלאות: ההפרש הוא בדיוק המס המצטבר, ולא שינוי אחר בתזרים
   const monthly = res.years[0].tax / 12;
   [[0, 33242], [1, 12735], [2, 18477], [11, 306409]].forEach(([i, target]) => {
@@ -223,8 +226,11 @@ test('#4 מס: עוסק מורשה משלם מס פרוגרסיבי וביטוח
   assert.ok(t.ni > 0, 'יש ביטוח לאומי');
   assert.ok(t.total > 404662 * 0.2, `${Math.round(t.total)} צריך להיות גבוה מ-20% שטוח (80,932)`);
   near(t.total, t.incomeTax + t.ni, 0.01);
-  assert.ok(t.effectivePct > 28 && t.effectivePct < 36, `שיעור אפקטיבי סביר, קיבלנו ${t.effectivePct.toFixed(1)}%`);
-  near(t.total, 127515, 5);
+  // הטווח והסכום עודכנו אחרי תיקון באג חוסם 2 של סבב QA 5: דמי ביטוח בריאות נוספו
+  // לביטוח הלאומי (61,446 ₪ במקום 42,928 ₪), ורק 52% מרכיב הביטוח הלאומי (בלי הבריאות)
+  // מוכרים כהוצאה – ולכן גם מס ההכנסה עלה. הסכום הכולל: 146,034 ₪, 36.1% מהרווח.
+  assert.ok(t.effectivePct > 28 && t.effectivePct < 40, `שיעור אפקטיבי סביר, קיבלנו ${t.effectivePct.toFixed(1)}%`);
+  near(t.total, 146034, 5);
 });
 
 test('#4 מס: חברה בע"מ משלמת מס חברות בלבד', () => {
@@ -259,7 +265,7 @@ test('#4 מס: צורת ההתאגדות משנה את הרווח הנקי וא�
   assert.ok(osek.years[0].tax > company.years[0].tax);
   assert.ok(osek.years[0].net < company.years[0].net);
   assert.ok(osek.minDscr < company.minDscr, 'ה-DSCR מושפע מהמס, כמו שתמר ציפתה');
-  near(osek.minDscr, 3.06, 0.01);
+  near(osek.minDscr, 2.67, 0.01); // ירד מ-3.06 בעקבות תיקון ביטוח לאומי (QA 5, באג חוסם 2)
 });
 
 test('#4 מס: הטבלאות הן קונפיגורציה, עם הערה שזו הערכה לאימות מול רו"ח', () => {
@@ -328,9 +334,16 @@ test('ל1 גישור על חודשי מינוס: לעסק בהקמה לא מצה
   assert.ok(res.negativeMonths.length > 0, 'זה בדיוק התרחיש שבו המשפט מודפס');
   const wc = E.workingCapitalTotal(cafe());
   assert.equal(wc, 80000, 'ההון החוזר שכבר מוצג בפרק 5');
-  const forNew = E.bridgeText(true, wc);
+  // עדכון אחרי סבב QA 5, באג חוסם 1: הדרישה מסבב 4 ("לא להמציא מסגרת אשראי") נשארת,
+  // אבל ההפניה להון החוזר בענף הזה בוטלה – ההון החוזר נכנס לחשבון בחודש 1 יחד עם
+  // ההלוואה, ובחודשי המינוס (2–3) הוא כבר נוצל, ולכן אינו מקור גישור נוסף.
+  const forNew = E.bridgeText(true, wc, res.cash);
   assert.ok(!/מסגרת אשראי/.test(forNew), 'עסק בהקמה – אין לו מסגרת, ולא נשאל עליה');
-  assert.ok(forNew.includes('80,000'), 'מפנים למקור אמיתי שכבר במסמך: ההון החוזר');
+  assert.ok(!/ההון החוזר/.test(forNew), 'לא מפנים לכסף שכבר נוצל בתזרים (QA 5)');
+  assert.ok(/גרייס/.test(forNew) && /ההון העצמי/.test(forNew), 'מפנים לפעולות אמיתיות: גרייס, דחיית השקעות, הון עצמי');
+  // הון חוזר שבנקודה הנמוכה עוד קיים בחשבון בפועל – כן אפשר להפנות אליו
+  const stillThere = E.bridgeText(true, wc, [{ month: 1, closing: 80000 }]);
+  assert.ok(stillThere.includes('80,000'), 'כשהכסף עוד בחשבון, ההפניה אליו נכונה');
   // בלי הון חוזר אין מה להפנות אליו, ועדיין אין המצאת עובדה
   const noWc = E.bridgeText(true, 0);
   assert.ok(!/מסגרת אשראי/.test(noWc) && /גרייס|הון העצמי/.test(noWc));
@@ -338,7 +351,7 @@ test('ל1 גישור על חודשי מינוס: לעסק בהקמה לא מצה
   assert.equal(E.bridgeText(false, 0), 'העסק יגשר על כך באמצעות מסגרת אשראי קיימת או דחיית חלק מההשקעות.');
   const app = read('app.js');
   assert.ok(!app.includes('העסק יגשר על כך באמצעות מסגרת אשראי קיימת'), 'המשפט הקשיח הוסר מהמסמך');
-  assert.ok(app.includes('E.bridgeText(isNew, E.workingCapitalTotal(p))'), 'הניסוח נגזר מסוג העסק');
+  assert.ok(app.includes('E.bridgeText(isNew, E.workingCapitalTotal(p), res.cash)'), 'הניסוח נגזר מסוג העסק וממסלול התזרים בפועל');
 });
 
 test('ל1ב מרווח דק: גם ענף האזהרה של cushionText לא ממציא מסגרת אשראי לעסק בהקמה', () => {

@@ -265,3 +265,55 @@ input::placeholder, textarea::placeholder { color: var(--ink-faint); }
   .doc table, .doc tr { break-inside: avoid; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- גל ב' (סעיפים 16–21): כרטיסי מדדים, גרפים, קבוצות בטבלת התזרים,
+   כותרת יחידות וטבלת תרחישים. הועבר לכאן מתוך <style> ב-index.html, בלי שינוי תוכן. ---------- */
+/* סעיף 16 – כרטיסי מדדים בראש הדוח */
+.doc-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 20px 0 4px; }
+@media (max-width: 860px) { .doc-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 430px) { .doc-metrics { grid-template-columns: minmax(0, 1fr); } }
+.doc .metric { min-width: 0; background: #F6FAF8; border: 1px solid #DEE7E2; border-inline-start: 4px solid #0F4D3A; border-radius: 8px; padding: 10px 12px; }
+.doc .metric .m-label { display: block; font-family: var(--sans); font-size: 12px; color: #5A6660; }
+.doc .metric .m-value { display: block; font-family: var(--serif); font-size: 24px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.doc .metric .m-note { display: block; font-family: var(--sans); font-size: 12px; line-height: 1.45; color: #5A6660; }
+.doc .metric-ok { border-inline-start-color: #1F7A4D; }
+.doc .metric-warn { border-inline-start-color: #9A5A07; background: #FDF8EF; }
+.doc .metric-risk { border-inline-start-color: #B3261E; background: #FDF3F2; }
+.doc .metric-risk .m-value, .doc .metric-warn .m-value { color: #8A2F10; }
+
+/* סעיף 17 – גרפים (SVG טהור, בלי ספרייה חיצונית) */
+.doc .chart { margin: 14px 0 10px; }
+.doc .chart figcaption { font-family: var(--sans); font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.doc .chart-scroll { overflow-x: auto; }
+.doc .ch { display: block; width: 100%; min-width: 520px; height: auto; }
+.doc .ch-grid { stroke: #E4E2DA; stroke-width: 1; }
+.doc .ch-zero { stroke: #17201B; stroke-width: 1.2; }
+.doc .ch-tick, .doc .ch-xlab, .doc .ch-axis-title { font-family: var(--sans); font-size: 12px; fill: #5A6660; }
+.doc .ch-xlab, .doc .ch-axis-title { text-anchor: middle; }
+/* סימוני הציר יושבים בשוליים שמימין לציור, ולכן הם נכתבים משמאל לימין מנקודת העיגון */
+.doc .ch-tick { direction: ltr; text-anchor: start; }
+.doc .ch-path { stroke: #0F4D3A; stroke-width: 2.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.doc .ch-dot { fill: #0F4D3A; }
+.doc .ch-dot.neg { fill: #B3261E; }
+.doc .bar-revenue { fill: #0F4D3A; }
+.doc .bar-ebitda { fill: #5E9C7F; }
+.doc .bar-net { fill: #9A7419; }
+.doc .ch-legend { display: flex; flex-wrap: wrap; gap: 14px; font-family: var(--sans); font-size: 12px; color: #5A6660; margin: 2px 0 0; }
+.doc .ch-legend .lg::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 5px; }
+.doc .ch-legend .lg-revenue::before { background: #0F4D3A; }
+.doc .ch-legend .lg-ebitda::before { background: #5E9C7F; }
+.doc .ch-legend .lg-net::before { background: #9A7419; }
+
+/* סעיף 20 – יחידות: הסימן ₪ מופיע בכותרת הטבלה בלבד */
+.doc caption { caption-side: top; text-align: start; font-family: var(--sans); font-size: 12px; color: #5A6660; padding: 0 0 4px; }
+
+/* סעיף 18 – הפרדה ויזואלית בין תקבולים לתשלומים */
+.doc table.cf tbody + tbody { border-top: 2px solid #C8D5CE; }
+.doc table.cf th, .doc table.cf td { padding-inline: 4px; }
+.doc table.cf tr.grp th { background: #EAF2EE; font-family: var(--sans); font-weight: 700; font-size: 12px; letter-spacing: .02em; text-align: start; padding-block: 4px; }
+.doc table.cf tbody.cf-out tr.grp th { background: #F7F0E6; }
+.doc table.cf tbody.cf-bottom tr.sub th, .doc table.cf tbody.cf-bottom tr.sub td { background: #F6F7F5; }
+
+/* סעיף 19 – טבלת תרחישים */
+.doc table.scenarios tr.sub th, .doc table.scenarios tr.sub td { background: #F6FAF8; }
+@media print { .doc .chart, .doc .doc-metrics, .doc .metric { break-inside: avoid; } }
