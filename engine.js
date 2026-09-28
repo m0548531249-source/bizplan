@@ -264,7 +264,10 @@
    * @param {{interest:number}[]} [schedule] לוח הסילוקין – הריבית של כל חודש, אם יש הלוואה
    * @returns {number[]} 12 סכומי מס חודשיים
    */
-  function taxSpread(f, annualTax, schedule) {
+  function taxSpread(fIn, annualTax, schedule) {
+    // taxSpread(null) קרס ב-salesLevel (ממצא QA סבב 7, שיפור 4 סעיף ה'). בלי הנחות אין
+    // מכירות ואין רווח חודשי, ולכן המס נפרס שווה – בדיוק כמו בכל מקרה בלי רווח חיובי.
+    const f = fIn || {};
     const total = Math.max(0, Number(annualTax) || 0);
     const monthly = (Number(f && f.annualSales) || 0) / 12;
     const weights = [];
@@ -295,10 +298,13 @@
    * opts.vat: {amount, refundMonth} – המע"מ על רכישת הציוד. יוצא בחודש 1 וחוזר מרשות
    * המסים כעבור TAX.vatRefundMonths חודשים. זה לא "שימוש בכספים" (הכסף חוזר), אבל הוא
    * כן צריך להיות בחשבון באותם חודשים – ולכן הוא מוצג בתזרים בלבד (סעיף 13).
+   * opts.working: הון חוזר שהמשתמש פירט כפריט שימוש (מלאי, חומרי גלם, שיווק) – יוצא
+   * בחודש 1, כמו ההשקעות. ראו workingCapitalOutflow להחלטה החשבונאית (שיפור 4, ב1).
    * תאימות לאחור: מותר להעביר מספר במקום opts, והוא ייקרא כ-capex.
    */
   function cashflow(f, loanAmount, uses, schedule, equity, opts) {
     const o = opts && typeof opts === 'object' ? opts : { capex: opts };
+    const workingOut = Math.max(0, Number(o.working) || 0);
     const vatAmount = Math.max(0, Number(o.vat && o.vat.amount) || 0);
     const vatRefundMonth = Math.max(2, Math.round(Number(o.vat && o.vat.refundMonth) || (1 + TAX.vatRefundMonths)));
     let cash = (f.openingCash || 0);
@@ -320,14 +326,15 @@
       const draw = f.ownerDrawMonthly || 0;
       const debt = (schedule && schedule[m - 1]) ? schedule[m - 1].payment : 0;
       const invest = m === 1 ? capex : 0;
+      const working = m === 1 ? workingOut : 0;
       const tax = taxByMonth ? (taxByMonth[m - 1] || 0) : monthlyTax;
       const vatOut = m === 1 ? vatAmount : 0;
       const vatIn = m === vatRefundMonth ? vatAmount : 0;
       const opening = cash;
       const inflow = revenue + loanIn + equityIn + vatIn;
-      const outflow = cogs + fixed + salaries + draw + debt + invest + tax + vatOut;
+      const outflow = cogs + fixed + salaries + draw + debt + invest + working + tax + vatOut;
       cash = opening + inflow - outflow;
-      rows.push({ month: m, opening, revenue, loanIn, equityIn, vatIn, cogs, fixed, salaries, draw, debt, invest, tax, vatOut, inflow, outflow, closing: cash });
+      rows.push({ month: m, opening, revenue, loanIn, equityIn, vatIn, cogs, fixed, salaries, draw, debt, invest, working, tax, vatOut, inflow, outflow, closing: cash });
     }
     return rows;
   }
@@ -520,6 +527,36 @@
   }
 
   /**
+   * שיפור 4, ב1 – הון חוזר שנכנס עם ההלוואה ולא יצא אף פעם בתזרים.
+   *
+   * ההחלטה החשבונאית: מבחינים בין שני סוגי "הון חוזר", לפי מקורם.
+   *
+   * 1. הון חוזר שהמשתמש פירט כפריט שימוש (loan.uses עם type 'working': "חומרי גלם
+   *    ומלאי", "שיווק", "משווק"). זו הצהרה לבנק שהכסף יוצא על משהו מסוים. קנייה של
+   *    מלאי היא יציאת מזומן אמיתית: עלות המכר בתזרים מניחה שהקניות השוטפות שוות
+   *    לצריכה, ולכן בניית מלאי נוסף (או קמפיין שיווק חד-פעמי) היא תשלום *נוסף* על
+   *    עלות המכר. לכן הוא יוצא בחודש 1, בשורה נפרדת בתזרים. בלי זה, בתוכנית לדוגמה
+   *    75,000 ₪ נכנסו עם ההלוואה ונשארו בחשבון לתמיד, והיתרה המינימלית (113,142 ₪)
+   *    הייתה מנופחת בדיוק בסכום הזה.
+   *    חודש 1 ולא פריסה: זה המועד שבו הכסף מתקבל ובו הוא מוצהר כמנוצל, וזו גם
+   *    ההנחה השמרנית (היתרה המינימלית לא מיופה).
+   *
+   * 2. הון חוזר שהכלי גזר בעסק בהקמה (planUses: "כל מה שנשאר מהמקורות מעל עלויות
+   *    ההקמה"). זה לא פריט קנייה אלא כרית מזומן לחודשי ההרצה – וההוצאות של החודשים
+   *    האלה (שכר, הוצאות קבועות, עלות מכר בזמן שהמכירות נמוכות) כבר נמצאות בתזרים.
+   *    הוצאה שלו בחודש 1 הייתה סופרת את אותן הוצאות פעמיים. לכן הוא נשאר בחשבון,
+   *    ומה שלא נוצל ממנו בנקודה הנמוכה מוצג במפורש כ"רזרבה שלא נוצלה" (reserveNote).
+   *
+   * מגבלה ידועה: פריט שסווג כהון חוזר אבל כבר נמצא בהוצאות החודשיות (למשל "שכר
+   * עובדים חדשים" שגם נכלל בשכר החודשי) ייספר פעמיים. זו הטעות השמרנית, והבדיקה
+   * א4 (suggestUseCategory) מסייעת למשתמש לסווג נכון.
+   */
+  function workingCapitalOutflow(plan) {
+    if (setupDrivesUses(plan)) return 0;
+    return sumAmounts(((plan && plan.loan && plan.loan.uses) || []).filter((u) => u.type === 'working'));
+  }
+
+  /**
    * סעיף 22 – ניקוי כותרת שורה שהמשתמש הזין. כותרת שורה אינה משפט, ולכן נקודתיים
    * או נקודה בסופה מיותרים במסמך: "רכישת ציוד ומכונות קפה:" → "רכישת ציוד ומכונות קפה".
    * נוגעים רק ברווחים ובפיסוק שבסוף המחרוזת – אף אות אינה נמחקת (סעיף 23), ואם
@@ -629,6 +666,7 @@
     const taxByMonth = taxSpread(f, years[0].tax, schedule);
     const cash = cashflow(f, plan.loan.amount, uses, schedule, equityInflow(plan), {
       capex: investmentTotal(plan),
+      working: workingCapitalOutflow(plan),
       monthlyTax: taxByMonth,
       vat: { amount: vat, refundMonth: 1 + TAX.vatRefundMonths },
     });
@@ -641,6 +679,7 @@
       sourcesTotal: sourcesTotal(plan),
       setupTotal: setupCostsTotal(plan),
       investment: investmentTotal(plan),
+      workingOut: workingCapitalOutflow(plan),
       vat: { amount: vat, refundMonth: 1 + TAX.vatRefundMonths },
       annualTax: years[0].tax,
       taxByMonth,                      // הפריסה בפועל שבטבלת התזרים
@@ -657,6 +696,9 @@
     res.assumptions = assumptionWarnings(plan);
     res.checks = integrityChecks(plan, res);
     res.blocking = res.checks.filter((c) => !c.ok);
+    // שיפור 4, א': בדיקות העקביות. לא ממוזגות ל-res.blocking – שכבת התצוגה מחליטה
+    // איך להציג את 'block' (res.blocking נשאר רק לבדיקות התקינות של הטבלאות).
+    res.consistency = consistencyChecks(plan);
     return res;
   }
 
@@ -755,7 +797,9 @@
 
   /**
    * ניסוח הגישור על חודשי המינוס, בפרק הסיכונים שבמסמך.
-   * עסק פועל – יש לו מסגרת אשראי קיימת, וזו הצהרה נכונה.
+   * עסק פועל – גם הוא לא נשאל אם יש לו מסגרת אשראי, ולכן אסור לקבוע "מסגרת אשראי
+   * קיימת"; הוא "יבדוק מול הבנק אשראי לטווח קצר" (ממצא QA סבב 7, החלטת מנכ"ל 28.09.2026,
+   * באותו ניסוח של הממשק).
    * עסק בהקמה – אין לו מסגרת אשראי, ולא שאלנו אותו על כך; אסור להצהיר לבנק על
    * עובדה שלא קיימת (ממצא QA סבב 4, באג לא-חוסם 1).
    * ההפניה להון החוזר נעשית רק אם הוא באמת עוד קיים בחשבון באותה נקודה: המשפט
@@ -764,7 +808,7 @@
    * (ממצא QA סבב 5, באג חוסם 1).
    */
   function bridgeText(isNew, workingCapital, cashOrCushion) {
-    if (!isNew) return 'העסק יגשר על כך באמצעות מסגרת אשראי קיימת או דחיית חלק מההשקעות.';
+    if (!isNew) return 'העסק יגשר על כך בדחיית חלק מההשקעות, ובמידת הצורך יבדוק מול הבנק אשראי לטווח קצר לחודשים האלה.';
     const available = unusedWorkingCapital(workingCapital, cashOrCushion, 0);
     return available > 0.5
       ? `הגישור ייעשה מתוך ההון החוזר שנותר בחשבון באותם חודשים (${ils(available)}), ובמידת הצורך גם בדחיית חלק מההשקעות, בהוספת חודשי גרייס או בהגדלת ההון העצמי.`
@@ -774,7 +818,8 @@
   /**
    * ניסוח המרווח הדק בפרק הסיכונים שבמסמך – מה העסק יעשה כשהיתרה הנמוכה ביותר
    * קטנה מחודש הוצאות, אבל התזרים עדיין לא נכנס למינוס.
-   * עסק פועל – יש לו חשבון פעיל ומסגרת אשראי, וזו הצהרה נכונה.
+   * עסק פועל – לא נשאל על מסגרת אשראי, ולכן לא מצהירים שיש לו; הוא "יבדוק מול הבנק
+   * אשראי לטווח קצר" (החלטת מנכ"ל 28.09.2026, כמו bridgeText).
    * עסק בהקמה – אין לו מסגרת אשראי ולא שאלנו אותו עליה; מפנים להון החוזר האמיתי
    * שכבר מוצג במקורות ובשימושים. אותה משפחת ממצאים של bridgeText (QA סבב 4).
    * המשפט מודפס רק כשהיתרה בתזרים עדיין חיובית (level === 'warn'), כלומר ההון החוזר
@@ -785,7 +830,7 @@
    * שמודפס דווקא בחודשי מינוס ולכן ברירת המחדל שלו היא לא להפנות להון החוזר כלל.
    */
   function thinCushionText(isNew, workingCapital, cashOrCushion) {
-    if (!isNew) return 'העסק ישמור על מסגרת אשראי זמינה ויתאים את קצב ההשקעות לתקבולים בפועל.';
+    if (!isNew) return 'העסק יתאים את קצב ההשקעות לתקבולים בפועל, ובמידת הצורך יבדוק מול הבנק אשראי לטווח קצר.';
     const wc = unusedWorkingCapital(workingCapital, cashOrCushion, workingCapital);
     return wc > 0.5
       ? `ההון החוזר שבמקורות ובשימושים נועד בדיוק לחודשים האלה: בנקודה הנמוכה ביותר יישארו ממנו ${ils(wc)} בחשבון, והעסק יתאים את קצב ההשקעות לתקבולים בפועל.`
@@ -1000,6 +1045,200 @@
       });
     }
     return out;
+  }
+
+  // ---------- שיפור 4, ספרינט 1: בדיקות עקביות לפני הפקה (א1–א7) ----------
+
+  /**
+   * כל הספים ורשימות מילות המפתח במקום אחד. מילות המפתח לקוחות מילה במילה ממקור
+   * השיפור (docs/IMPROVEMENT-4-SOURCE-v2.md); הצורות הנוספות (רבים, סמיכות) רק מאפשרות
+   * לזהות את אותה מילה בנטייה אחרת ("מקררים", "מכונת").
+   */
+  const CONSISTENCY = {
+    salesJumpPct: 30,          // א3: צמיחה מעל זה לעומת השנה שעברה דורשת הסבר
+    minFixedForPremises: 3000, // א2: מטרה של שכירות/מקום עם הוצאות קבועות נמוכות מזה
+    minWords: 5,               // א5: פחות מזה בשדה טקסט חובה
+    cogsWarnPct: 85,           // א7: עלות מכר מעל זה – אזהרה
+    cogsBlockPct: 100,         // א7: עלות מכר מעל זה – חסימה
+  };
+  // א2: מילים במטרת ההלוואה
+  const PURPOSE_STAFF_WORDS = ['עובדים', 'העסקה', 'גיוס'];
+  const PURPOSE_PREMISES_WORDS = ['שכירות', 'מתחם', 'מקום'];
+  // א4: מילות המפתח לסיווג פריט (המילה מהמקור, ואחריה נטיות שלה)
+  const USE_KEYWORDS = {
+    capex: ['מחשב', 'מחשבים', 'תנור', 'תנורים', 'מקרר', 'מקררים', 'ציוד', 'מכונה', 'מכונות', 'מכונת',
+      'ריהוט', 'רהיטים', 'רכב', 'רכבים', 'שיפוץ', 'שיפוצים', 'שיפוצי'],
+    working: ['שכר', 'משווק', 'משווקים', 'משווקת', 'שיווק', 'פרסום', 'פרסומים', 'מלאי', 'סחורה', 'סחורות',
+      'חומרי גלם', 'חומר גלם'],
+  };
+  const USE_CATEGORY_LABEL = { capex: 'השקעה', working: 'הון חוזר (הוצאות שוטפות)' };
+  // א5: שדות הטקסט החובה שהבנק קורא
+  const TEXT_FIELDS = [
+    { key: 'business.description', label: 'תיאור העסק' },
+    { key: 'market.customers', label: 'מי הלקוחות שלכם' },
+    { key: 'market.advantage', label: 'למה לקוחות בוחרים בכם' },
+    { key: 'owner.experience', label: 'הניסיון שלכם בתחום' },
+  ];
+  // א3: שם השדה של ההסבר לקפיצת המחזור (נוסף בממשק ומוצג במסמך בפרק התחזית)
+  const GROWTH_REASON_FIELD = 'forecast.growthReason';
+
+  const getPath = (obj, key) => key.split('.').reduce((a, k) => (a == null ? a : a[k]), obj);
+  const HEB_PREFIX = 'ובכלמשה';
+
+  /**
+   * האם המילה (או הצירוף) מופיעה בטקסט כמילה שלמה, עם אותיות שימוש לפניה
+   * ("לעובדים", "והמלאי") – ולא כחלק ממילה אחרת ("מקומי" אינה "מקום", "הרכבה" אינה "רכב").
+   */
+  function hasWord(text, word) {
+    const s = String(text == null ? '' : text);
+    if (!s || !word) return false;
+    const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+    const re = new RegExp(`(^|[^\\u05D0-\\u05EA])[${HEB_PREFIX}]{0,3}${esc}(?![\\u05D0-\\u05EA])`);
+    return re.test(s);
+  }
+  const firstWord = (text, words) => words.find((w) => hasWord(text, w)) || '';
+
+  /** מספר המילים בטקסט חופשי (מילה = רצף שיש בו אות או ספרה) */
+  function wordCount(text) {
+    return String(text == null ? '' : text).split(/\s+/).filter((t) => /[\p{L}\p{N}]/u.test(t)).length;
+  }
+
+  /**
+   * א4 – הצעת סיווג לפריט בפירוט השימושים, לפי מילות מפתח בשם הפריט.
+   * מחזיר 'capex' (השקעה), 'working' (הון חוזר / שוטף) או null – כשאין מילת מפתח,
+   * או כשיש מילים משני הסוגים ("ציוד ומלאי") ואי אפשר להכריע.
+   */
+  function suggestUseCategory(label) {
+    const capex = USE_KEYWORDS.capex.some((w) => hasWord(label, w));
+    const working = USE_KEYWORDS.working.some((w) => hasWord(label, w));
+    if (capex === working) return null;
+    return capex ? 'capex' : 'working';
+  }
+
+  /** א3 – הקפיצה במחזור לעומת השנה שעברה. null כשאין נתון של שנה שעברה (עסק בהקמה) */
+  function salesJump(plan) {
+    const p = plan || {};
+    if (isNewBusiness(p)) return null;
+    const from = Number(p.history && p.history.lastYearSales) || 0;
+    const to = Number(p.forecast && p.forecast.annualSales) || 0;
+    if (!(from > 0) || !(to > 0)) return null;
+    const pct = (to / from - 1) * 100;
+    const reason = String(getPath(p, GROWTH_REASON_FIELD) || '').trim();
+    // סובלנות זעירה: 130,000/100,000 − 1 בנקודה צפה הוא 0.30000000000000004, ו-30% בדיוק אינו "מעל 30%"
+    return { from, to, pct, reason, needsReason: pct > CONSISTENCY.salesJumpPct + 1e-9 };
+  }
+
+  /**
+   * שיפור 4, א' – בדיקות עקביות בין הנתונים לפני הפקת המסמך.
+   * מחזיר [{ code, severity: 'block'|'warn', field, message }], בעברית פשוטה.
+   * 'block' – נתון שאי אפשר להפיק ממנו מסמך אמין; 'warn' – סתירה שהמשתמש מחליט עליה.
+   * לא חוזר על אזהרות שכבר קיימות ב-conflictWarnings וב-assumptionWarnings
+   * (רווחיות מעל 35%, קצב הגעה, מחזור לעובד, ניסוח של עסק חדש/קיים).
+   *
+   * codes: trackVsYears (א1), purposeStaff, purposePremises (א2), salesJump (א3),
+   * useCategory (א4), shortText (א5), yearsMissing, employeesMissing (א6),
+   * cogsOver100, cogsHigh (א7).
+   */
+  function consistencyChecks(plan) {
+    const p = plan || {};
+    const b = p.business || {};
+    const f = p.forecast || {};
+    const loan = p.loan || {};
+    const isNew = isNewBusiness(p);
+    const out = [];
+    const add = (code, severity, field, message) => out.push({ code, severity, field, message });
+    const blank = (v) => v == null || String(v).trim() === '';
+
+    // א6 – ותק ועובדים בעסק שכבר פועל: שדה ריק או 0 שנים הם כמעט תמיד דילוג
+    if (!isNew) {
+      if (blank(b.years) || !(Number(b.years) > 0)) {
+        add('yearsMissing', 'block', 'business.years',
+          'כתבו כמה שנים העסק פועל. בעסק שכבר פועל אי אפשר להשאיר את השדה ריק או 0 – זה אחד הנתונים הראשונים שהבנק בודק. אם העסק נפתח לפני פחות משנה, כתבו את החלק היחסי (למשל 0.5 לחצי שנה).');
+      }
+      if (blank(b.employees)) {
+        add('employeesMissing', 'block', 'business.employees',
+          'כתבו כמה עובדים יש בעסק (לא כולל אתכם). אם אין עובדים, כתבו 0.');
+      }
+    }
+
+    // א1 – עסק שפועל שנה ומעלה ובחר במסלול לעסקים בהקמה
+    if (!isNew && Number(b.years) >= 1 && loan.track === 'startup') {
+      add('trackVsYears', 'warn', 'loan.track',
+        `בחרתם ב"${TRACKS.startup}", אבל העסק פועל ${yearsText(b.years)}. המסלול הזה מיועד לעסקים שפועלים פחות משנה. עסק שפועל שנה ומעלה מגיש בדרך כלל ב"${TRACKS.general}".`);
+    }
+
+    // א2 – מטרת ההלוואה מול התחזית
+    const staffWord = firstWord(loan.purpose, PURPOSE_STAFF_WORDS);
+    if (staffWord && !(Number(f.monthlySalaries) > 0)) {
+      add('purposeStaff', 'warn', 'forecast.monthlySalaries',
+        `במטרת ההלוואה כתוב "${staffWord}", אבל בהוצאות השכר החודשי הוא 0. הבנק יראה שהכסף מיועד לעובדים שלא מופיעים בתחזית. כדאי להוסיף את עלות השכר, או לתקן את מטרת ההלוואה.`);
+    }
+    const premisesWord = firstWord(loan.purpose, PURPOSE_PREMISES_WORDS);
+    if (premisesWord && (Number(f.monthlyFixed) || 0) < CONSISTENCY.minFixedForPremises) {
+      add('purposePremises', 'warn', 'forecast.monthlyFixed',
+        `במטרת ההלוואה כתוב "${premisesWord}", אבל ההוצאות הקבועות בחודש הן רק ${ils(Number(f.monthlyFixed) || 0)}. מקום לעסק עולה בדרך כלל יותר, והבנק יראה סתירה. כדאי לבדוק שהשכירות והוצאות המקום נכללו בהוצאות הקבועות.`);
+    }
+
+    // א3 – קפיצה במחזור לעומת השנה שעברה, בלי הסבר
+    const jump = salesJump(p);
+    if (jump && jump.needsReason && !jump.reason) {
+      add('salesJump', 'warn', GROWTH_REASON_FIELD,
+        `המחזור בתחזית (${ils(jump.to)}) גבוה ב-${num(jump.pct)}% מהמחזור בשנה שעברה (${ils(jump.from)}). זו קפיצה גדולה, והבנק ישאל מאיפה היא תגיע. כתבו בכמה משפטים מה ישתנה (למשל ציוד חדש, לקוח גדול, סניף נוסף). ההסבר יופיע במסמך בפרק התחזית.`);
+    }
+
+    // א4 – סיווג פריטים בפירוט השימושים (רק כשהמשתמש בחר סיווג בעצמו, כלומר לא בעסק
+    // בהקמה שבו השימושים נגזרים מעלויות ההקמה)
+    if (!setupDrivesUses(p)) {
+      (loan.uses || []).forEach((u, i) => {
+        if (!hasContent(u) || (u.type !== 'capex' && u.type !== 'working')) return;
+        const suggested = suggestUseCategory(u.item);
+        if (!suggested || suggested === u.type) return;
+        const name = tidyLabel(u.item);
+        add('useCategory', 'warn', `loan.uses.${i}.type`,
+          `הפריט "${name}"${Number(u.amount) > 0 ? ` (${ils(u.amount)})` : ''} סומן כ${USE_CATEGORY_LABEL[u.type]}, אבל הוא נשמע כמו ${USE_CATEGORY_LABEL[suggested]}. ${suggested === 'working'
+            ? 'השקעה היא קנייה של משהו שנשאר בעסק, כמו ציוד או שיפוץ; שכר, שיווק ומלאי הם הוצאות שוטפות.'
+            : 'ציוד, ריהוט, רכב ושיפוץ הם השקעה – משהו שנקנה פעם אחת ונשאר בעסק.'} כדאי לבדוק את הסיווג.`);
+      });
+    }
+
+    // א5 – טקסט חופשי קצר מדי בשדות שהבנק קורא
+    TEXT_FIELDS.forEach((fl) => {
+      const value = getPath(p, fl.key);
+      if (blank(value)) return; // שדה ריק נתפס כבר בבדיקת שדות החובה באשף
+      const n = wordCount(value);
+      if (n < CONSISTENCY.minWords) {
+        add('shortText', 'warn', fl.key,
+          `בשדה "${fl.label}" ${n === 1 ? 'כתובה מילה אחת בלבד' : `כתובות ${num(n)} מילים בלבד`}. הבנק יקרא את זה. כדאי להרחיב.`);
+      }
+    });
+
+    // א7 – עלות מכר לא הגיונית
+    const cogs = Number(f.cogsPct) || 0;
+    if (cogs > CONSISTENCY.cogsBlockPct) {
+      add('cogsOver100', 'block', 'forecast.cogsPct',
+        `הזנתם שמכל 100 ₪ מכירה הולכים ${num(cogs)} ₪ על סחורה וחומרי גלם (עלות מכר) – יותר ממה שהמכירה מכניסה. כך כל מכירה מפסידה כסף. כנראה שזו טעות הקלדה; כדאי לבדוק את המספר.`);
+    } else if (cogs > CONSISTENCY.cogsWarnPct) {
+      add('cogsHigh', 'warn', 'forecast.cogsPct',
+        `הזנתם שמכל 100 ₪ מכירה הולכים ${num(cogs)} ₪ על סחורה וחומרי גלם (עלות מכר). נשארים ${100 - cogs === 0 ? '0 ₪' : `רק ${num(100 - cogs, Number.isInteger(100 - cogs) ? 0 : 1)} ₪`} לכל שאר ההוצאות ולהחזר ההלוואה, וזה נמוך מאוד. כדאי לוודא שהמספר נכון.`);
+    }
+    return out;
+  }
+
+  /**
+   * שיפור 4, ב1 – "רזרבה שלא נוצלה", בעסק בהקמה בלבד (ראו workingCapitalOutflow).
+   * ההון החוזר שהכלי גזר נשאר בחשבון; המשפט אומר במפורש כמה מהיתרה הנמוכה ביותר הוא
+   * עדיין הכסף הזה, כדי שלא ייקרא כרווח מהפעילות. בגוף שלישי – מיועד למסמך.
+   * מחזיר '' כשאין הון חוזר נגזר, או שהוא כבר נוצל כולו בנקודה הנמוכה.
+   */
+  function reserveNote(plan, res) {
+    if (!setupDrivesUses(plan)) return '';
+    const wc = workingCapitalTotal(plan);
+    const cash = (res && res.cash) || computePlan(plan).cash;
+    const min = minClosingBalance(cash);
+    const unused = unusedWorkingCapital(wc, cash, 0);
+    if (!(unused > 0.5) || min == null) return '';
+    if (unused >= min - 0.5) return `כל היתרה הנמוכה ביותר בתזרים (${ils(min)}) היא הון חוזר שנכנס עם מקורות המימון ועדיין לא נוצל – רזרבה שלא נוצלה, ולא כסף שהעסק הרוויח מהפעילות.`;
+    return `מתוך היתרה הנמוכה ביותר בתזרים (${ils(min)}), סכום של ${ils(unused)} הוא הון חוזר שנכנס עם מקורות המימון ועדיין לא נוצל – רזרבה שלא נוצלה, ולא כסף שהעסק הרוויח מהפעילות.`;
   }
 
   /**
@@ -1309,6 +1548,8 @@
       mk('tax', entity === 'company' ? 'מס חברות' : 'מס הכנסה וביטוח לאומי', col('tax')),
       mk('debt', 'החזר הלוואה', col('debt')),
       mk('invest', 'השקעות', col('invest'), true),
+      // שיפור 4, ב1: הון חוזר שפורט כפריט שימוש יוצא בחודש 1 (ראו workingCapitalOutflow)
+      mk('working', 'הון חוזר (לפי פירוט השימושים)', col('working'), true),
     ].filter((r) => any(r.values));
     const sum = (list) => rows.map((_, i) => list.reduce((s, r) => s + r.values[i], 0));
     const inTotal = sum(inRows);
@@ -1368,19 +1609,76 @@
     });
   }
 
-  /** משפט שמסביר את הטבלה בשפה פשוטה, לפי מה שקרה בתרחיש הגרוע ביותר */
+  /**
+   * שיפור 4, ב4 – ניסוח יחס כיסוי החוב לפי שלוש רמות, בדיוק לפי המקור:
+   * 1.25 ומעלה – "יכולת החזר טובה"; 1.0 עד 1.25 – "מרווח צר";
+   * מתחת ל-1.0 – "העסק לא יעמוד בהחזרים מהתזרים השוטף".
+   * לפני כן יחס של 0.04 תואר כ"המרווח מעל ההחזרים מצטמצם", כשבפועל העסק מכסה 4% בלבד.
+   * מחזיר null כשאין החזרים (יחס אינסופי).
+   */
+  const DSCR_PHRASES = { ok: 'יכולת החזר טובה', tight: 'מרווח צר', short: 'העסק לא יעמוד בהחזרים מהתזרים השוטף' };
+  function dscrPhrase(dscr) {
+    const d = Number(dscr);
+    if (!Number.isFinite(d)) return null;
+    if (d >= 1.25) return { level: 'ok', text: DSCR_PHRASES.ok };
+    if (d >= 1) return { level: 'tight', text: DSCR_PHRASES.tight };
+    return { level: 'short', text: DSCR_PHRASES.short };
+  }
+
+  /**
+   * משפט שמסביר את הטבלה בשפה פשוטה.
+   * שיפור 4, ב4 + סעיף ה': ההערה דיברה רק על התרחיש הגרוע, גם כשתרחיש הבסיס עצמו כבר
+   * במינוס. עכשיו: אם הבסיס במינוס – זה נאמר ראשון; אחרת, התרחיש הראשון (המתון ביותר)
+   * שבו החשבון נכנס למינוס. יחס הכיסוי בתרחיש הגרוע מנוסח לפי שלוש הרמות (dscrPhrase).
+   */
   function scenarioNote(list) {
     const rows = list || [];
     const worst = rows[rows.length - 1];
     if (!worst) return '';
-    const base = 'הטבלה בודקת מה קורה אם המכירות יהיו נמוכות מהתחזית, בעוד ההוצאות הקבועות, השכר והחזרי ההלוואה נשארים כפי שהם. ';
-    if (worst.minCash < 0) {
-      return `${base}בתרחיש של ירידה של ${num(-worst.pct)}% במכירות החשבון נכנס למינוס (יתרה נמוכה של ${ils(worst.minCash)} בחודש ${worst.minCashMonth}), ולכן נדרש מרווח נוסף: הון חוזר גדול יותר, דחיית חלק מההשקעות או חודשי גרייס.`;
+    const baseRow = rows.find((r) => r.key === 'base') || rows[0];
+    const intro = 'הטבלה בודקת מה קורה אם המכירות יהיו נמוכות מהתחזית, בעוד ההוצאות הקבועות, השכר והחזרי ההלוואה נשארים כפי שהם.';
+    const drop = (r) => `בירידה של ${num(-r.pct)}% במכירות`;
+    const parts = [intro];
+
+    // 1. יתרת המזומן
+    const firstNeg = rows.find((r) => r.minCash < 0);
+    if (baseRow && baseRow.minCash < 0) {
+      const deeper = worst !== baseRow && worst.minCash < baseRow.minCash
+        ? `, ו${drop(worst)} המינוס מעמיק ל-${ils(worst.minCash)}`
+        : '';
+      parts.push(`כבר בתחזית הבסיס, בלי שום ירידה במכירות, החשבון נכנס למינוס (יתרה נמוכה של ${ils(baseRow.minCash)} בחודש ${baseRow.minCashMonth})${deeper}.`);
+    } else if (firstNeg) {
+      const deeper = worst !== firstNeg && worst.minCash < firstNeg.minCash
+        ? `, ו${drop(worst)} היתרה הנמוכה יורדת ל-${ils(worst.minCash)}`
+        : '';
+      parts.push(`${firstNeg === worst ? 'ב' : 'כבר ב'}תרחיש של ירידה של ${num(-firstNeg.pct)}% במכירות החשבון נכנס למינוס (יתרה נמוכה של ${ils(firstNeg.minCash)} בחודש ${firstNeg.minCashMonth})${deeper}.`);
+    } else {
+      parts.push(`גם ${drop(worst)} היתרה הנמוכה ביותר בחשבון נשארת חיובית (${ils(worst.minCash)}).`);
     }
-    if (worst.minDscr < 1.25) {
-      return `${base}בתרחיש של ירידה של ${num(-worst.pct)}% במכירות יחס כיסוי החוב יורד ל-${num(worst.minDscr, 2)}, כלומר המרווח מעל ההחזרים מצטמצם. היתרה הנמוכה ביותר בחשבון נשארת חיובית (${ils(worst.minCash)}).`;
+
+    // 2. יחס כיסוי החוב בתרחיש הגרוע, לפי שלוש הרמות. אם המשפט הקודם כבר נקב
+    // בתרחיש הגרוע, לא חוזרים על שמו ("באותו תרחיש").
+    const baseNeg = Boolean(baseRow && baseRow.minCash < 0);
+    const worstNamed = baseNeg
+      ? worst !== baseRow && worst.minCash < baseRow.minCash
+      : (!firstNeg || firstNeg === worst || worst.minCash < firstNeg.minCash);
+    const where = worstNamed ? 'באותו תרחיש' : drop(worst);
+    const ph = dscrPhrase(worst.minDscr);
+    if (ph) {
+      const d = num(worst.minDscr, 2);
+      if (ph.level === 'ok') {
+        parts.push(`${where} יחס כיסוי החוב נשאר ${d}: ${ph.text}.`);
+      } else if (ph.level === 'tight') {
+        parts.push(`${where} יחס כיסוי החוב יורד ל-${d}: ${ph.text}. המזומן הפנוי עדיין מכסה את ההחזרים, אבל עם מעט מקום לטעות.`);
+      } else {
+        parts.push(worst.minDscr > 0
+          ? `${where} יחס כיסוי החוב יורד ל-${d}: ${ph.text}. המזומן הפנוי מכסה רק כ-${num(worst.minDscr * 100)}% מההחזרים.`
+          : `${where} יחס כיסוי החוב שלילי: ${ph.text}. אין לעסק מזומן פנוי לכיסוי ההחזרים.`);
+      }
     }
-    return `${base}גם בירידה של ${num(-worst.pct)}% במכירות יחס כיסוי החוב נשאר ${num(worst.minDscr, 2)} והיתרה הנמוכה ביותר בחשבון נשארת חיובית (${ils(worst.minCash)}).`;
+
+    if (firstNeg) parts.push('לכן נדרש מרווח נוסף: הון חוזר גדול יותר, דחיית חלק מההשקעות או חודשי גרייס.');
+    return parts.join(' ');
   }
 
   // ---------- גל ב', סעיפים 22–24 ופסקת הביטחונות ----------
@@ -1390,12 +1688,34 @@
    * במלים מה מצב העסק: "עסק בהקמה" מול "עסק פועל" ועוד הוותק בשנים.
    * הערך נשאר קצר, כדי לא לשבור את רוחב טבלת העובדות במסמך.
    */
+  /**
+   * ותק בשנים כטקסט עברי תקין, בלי לעגל חלקי שנה (QA שיפור 4 ספרינט 1, באג 2 – 0.5 הודפס "1 שנים").
+   * 0.5 → "חצי שנה", 1 → "שנה", 1.5 → "שנה וחצי", 2 → "שנתיים", 2.5 → "שנתיים וחצי",
+   * 3 → "3 שנים", 3.5 → "3 שנים וחצי". פחות משנה (שאינו חצי) – בחודשים. '' כשאין ותק.
+   */
+  function yearsText(y) {
+    const v = Number(y);
+    if (!Number.isFinite(v) || v <= 0) return '';
+    if (v < 1) {
+      const m = Math.max(1, Math.round(v * 12));
+      if (m === 6) return 'חצי שנה';
+      if (m === 12) return 'שנה';
+      return m === 1 ? 'חודש' : (m === 2 ? 'חודשיים' : `${m} חודשים`);
+    }
+    const whole = Math.floor(v + 1e-9);
+    const frac = v - whole;
+    const base = (n) => (n === 1 ? 'שנה' : (n === 2 ? 'שנתיים' : `${num(n)} שנים`));
+    if (frac < 1e-9) return base(whole);
+    if (Math.abs(frac - 0.5) < 1e-9) return `${base(whole)} וחצי`;
+    return `${num(v, 1)} שנים`;
+  }
+
   function businessStatus(plan) {
     const b = (plan && plan.business) || {};
     if (isNewBusiness(plan)) return { label: 'סטטוס', value: 'עסק בהקמה', isNew: true, years: 0 };
     const years = Math.max(0, Number(b.years) || 0);
-    const yearsText = years >= 2 ? `${num(years)} שנים` : (years === 1 ? 'שנה' : '');
-    return { label: 'סטטוס', value: yearsText ? `עסק פועל ${yearsText}` : 'עסק פועל', isNew: false, years };
+    const yt = yearsText(years);
+    return { label: 'סטטוס', value: yt ? `עסק פועל ${yt}` : 'עסק פועל', isNew: false, years };
   }
 
   /**
@@ -1466,8 +1786,12 @@
     CHART, niceStep, niceScale, lineChartData, barChartData, cashLineSeries, plBarGroups,
     cashflowSections, SCENARIOS, scenarioPlan, scenarios, scenarioNote, num,
     // גל ב' (סעיפים 22–24) ופסקת הביטחונות
-    tidyLabel, businessStatus, COLLATERAL, collateralRequirement, collateralSection,
-    ENTITY_GUARANTEE, COLLATERAL_SCOPE_NOTE };
+    tidyLabel, businessStatus, yearsText, COLLATERAL, collateralRequirement, collateralSection,
+    ENTITY_GUARANTEE, COLLATERAL_SCOPE_NOTE,
+    // שיפור 4, ספרינט 1 (א1–א7, ב1, ב4)
+    CONSISTENCY, USE_KEYWORDS, PURPOSE_STAFF_WORDS, PURPOSE_PREMISES_WORDS, GROWTH_REASON_FIELD,
+    consistencyChecks, suggestUseCategory, salesJump, wordCount,
+    workingCapitalOutflow, reserveNote, dscrPhrase, DSCR_PHRASES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Engine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

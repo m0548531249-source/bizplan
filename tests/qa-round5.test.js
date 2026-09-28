@@ -151,10 +151,11 @@ test('QA5 באג 4: טבלת היעד של מאיר (33,242 / 12,735 / 18,477 / 
   assert.equal(R(res.cash[11].closing), 160376, 'חודש 12 – פחות כל המס השנתי');
 });
 
-test('QA5 באג 5: אחוז עלות מכר לא הגיוני (150%) עובר בלי אזהרה', { todo: 'חשוב – ממתין לתיקון אורי' }, () => {
+test('QA5 באג 5: אחוז עלות מכר לא הגיוני (150%) עובר בלי אזהרה', () => {
   const p = cafe();
   p.forecast.cogsPct = 150;
   const res = E.computePlan(p);
-  const texts = [...res.warnings, ...E.assumptionWarnings(p).map((a) => a.text)].map(strip).join(' ');
+  // שיפור 4, א7: האזהרה נמצאת בבדיקות העקביות (res.consistency) – שינוי מינימלי באישור המנכ"ל
+  const texts = [...res.warnings, ...E.assumptionWarnings(p).map((a) => a.text), ...res.consistency.map((c) => c.message)].map(strip).join(' ');
   assert.ok(/עלות מכר|סחורה/.test(texts), `רווח גולמי שלילי (${R(res.years[0].grossProfit)}) בלי אזהרה על ההנחה`);
 });

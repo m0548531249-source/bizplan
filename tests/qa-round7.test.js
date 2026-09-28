@@ -126,7 +126,7 @@ test('פריסת מס: בלי רווח חודשי בכלל – חוזרים לח
   assert.deepEqual(E.taxSpread({ annualSales: 1200000, cogsPct: 0, monthlyFixed: 0, monthlySalaries: 0, rampMonths: 0 }, 0, []), Array(12).fill(0));
 });
 
-test.todo('קוסמטי: taxSpread(null, ...) קורס (TypeError ב-salesLevel) למרות השמירות f && f.x בגוף הפונקציה', () => {
+test('קוסמטי (תוקן בשיפור 4): taxSpread(null, ...) קורס (TypeError ב-salesLevel) למרות השמירות f && f.x בגוף הפונקציה', () => {
   assert.doesNotThrow(() => E.taxSpread(null, 1200, null));
 });
 
@@ -195,7 +195,7 @@ test('מרווח תקין (הון עצמי 150,000): אין אזהרת מינו�
 
 // ---------- 5. ממצאים פתוחים (todo – ממתינים למפתח) ----------
 
-test.todo('חשוב: עסק פועל עם חודשי מינוס – הכרטיס אומר "לבדוק מול הבנק מסגרת אשראי", המסמך קובע "מסגרת אשראי קיימת"', () => {
+test('חשוב (תוקן בשיפור 4): עסק פועל עם חודשי מינוס – הכרטיס אומר "לבדוק מול הבנק מסגרת אשראי", המסמך קובע "מסגרת אשראי קיימת"', () => {
   const res = E.computePlan(bakery());
   assert.equal(res.rating.level, 'ok');
   assert.equal(res.cushion.level, 'risk');
@@ -205,7 +205,7 @@ test.todo('חשוב: עסק פועל עם חודשי מינוס – הכרטיס
   assert.ok(!/מסגרת אשראי קיימת/.test(doc), `המסמך מצהיר על עובדה שהמשתמש לא מסר: ${doc}`);
 });
 
-test.todo('חשוב: בחודש דחוק מסך הסיכום מציג את אותה אזהרה פעמיים (בכרטיס וב"כדאי לטפל לפני ההגשה")', () => {
+test('חשוב (תוקן בשיפור 4, אומת ע"י תמר): בחודש דחוק מסך הסיכום מציג את אותה אזהרה פעמיים (בכרטיס וב"כדאי לטפל לפני ההגשה")', () => {
   const app = read('app.js');
   // הכרטיס מוסיף thinMonthNote כשהדירוג חזק; רשימת התיקונים מוסיפה cushionText('wizard') באותו מצב
   const cardAddsThin = /E\.thinMonthNote\(res\.cushion\)/.test(app);
@@ -213,7 +213,7 @@ test.todo('חשוב: בחודש דחוק מסך הסיכום מציג את או�
   assert.ok(!(cardAddsThin && fixesAddThin), 'אותו חודש דחוק מדווח פעמיים במסך הסיכום');
 });
 
-test.todo('קוסמטי: הערת התרחישים מדברת רק על התרחיש הגרוע, גם כשתרחיש הבסיס עצמו כבר במינוס', () => {
+test('קוסמטי (תוקן בשיפור 4): הערת התרחישים מדברת רק על התרחיש הגרוע, גם כשתרחיש הבסיס עצמו כבר במינוס', () => {
   const res = E.computePlan(cafe((p) => { p.startup.equity = 40000; }));
   const list = E.scenarios(cafe((p) => { p.startup.equity = 40000; }));
   assert.ok(list[0].minCash < 0, 'תרחיש הבסיס במינוס');

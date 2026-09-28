@@ -317,3 +317,23 @@ input::placeholder, textarea::placeholder { color: var(--ink-faint); }
 /* סעיף 19 – טבלת תרחישים */
 .doc table.scenarios tr.sub th, .doc table.scenarios tr.sub td { background: #F6FAF8; }
 @media print { .doc .chart, .doc .doc-metrics, .doc .metric { break-inside: avoid; } }
+
+/* שיפור 4: בדיקות עקביות ליד השדה, והערת הסיווג מתחת לפריט בפירוט השימושים */
+.checks { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.checks:empty { display: none; }
+.check { margin: 0; padding: 8px 12px; border-radius: 8px; font-size: 15px; line-height: 1.5; background: var(--warn-bg); color: var(--ink); border-inline-start: 4px solid var(--warn); }
+.check-block { background: var(--risk-bg); border-inline-start-color: var(--risk); }
+.check-block b { color: var(--risk); }
+.use-row .use-note { grid-column: 1 / -1; margin: -2px 0 4px; font-size: 14px; }
+.use-row .use-note:empty { display: none; }
+.fixes li .btn-text { white-space: nowrap; }
+.fixes.blocking li { background: var(--risk-bg); }
+
+/* החלטת מאיר: בדוגמה, מה שהכלי זיהה מוצג כהדגמה ולא כטעות */
+.sample-demo { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin: 0 0 14px; }
+.sample-demo h3 { font-family: var(--serif); font-size: 18px; margin: 0 0 6px; }
+.sample-demo p { margin: 0 0 8px; }
+.sample-demo ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.sample-demo li { background: var(--warn-bg); border-radius: 8px; padding: 8px 12px; font-size: 15px; }
+.caught { display: inline-block; background: var(--ok-bg); color: var(--ok); font-weight: 700; font-size: 13px; border-radius: 999px; padding: 1px 10px; margin-inline-end: 6px; }
+.doc .sample-flag { font-family: var(--sans); font-size: 13px; color: #1F7A4D; background: #E4F2EA; border-radius: 6px; padding: 6px 10px; margin: 8px 0; }

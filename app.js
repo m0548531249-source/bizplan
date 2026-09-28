@@ -1,6 +1,179 @@
 /* תוכנית עסקית בקליק – גרסה 2: מסך פתיחה, אשף בשפה פשוטה, סיכום ומסמך. כל הנתונים נשארים בדפדפן. */
+
+/**
+ * שיפור 4, ספרינט 1 – לוגיקת ממשק טהורה (בלי DOM), כדי שאפשר יהיה לבדוק אותה ב-node.
+ * כל פונקציה שנשענת על המנוע מקבלת אותו כפרמטר, ובודקת שהפונקציה קיימת לפני שקוראת לה
+ * (consistencyChecks ו-suggestUseCategory נוספות ב-engine.js במקביל).
+ */
+const BizplanUI = (function () {
+  'use strict';
+  /** א3: מעל כמה אחוזי צמיחה לעומת השנה שעברה נדרש הסבר */
+  const JUMP_PCT = 30;
+  const JUMP_FIELD = 'forecast.growthReason'; // אותו שם כמו GROWTH_REASON_FIELD ב-engine.js
+  // בדיקות שנוגעות רק לעסק שכבר פועל. בעסק חדש הן לא מוצגות גם אם המנוע החזיר אותן.
+  const EXISTING_ONLY = [/^history\./, /^business\.years$/, /^forecast\.growthReason$/];
+  const A3_CODE = /a3|jump|growth/i;
+
+  const txt = (v) => String(v == null ? '' : v).trim();
+  const isNew = (p) => {
+    const b = (p && p.business) || {};
+    return b.isNew === true || (b.isNew == null && !b.years);
+  };
+
+  /** א3: שיעור הצמיחה של המחזור הצפוי מול השנה שעברה, ואם צריך עליו הסבר */
+  function jumpInfo(p) {
+    const last = Number(p && p.history && p.history.lastYearSales) || 0;
+    const next = Number(p && p.forecast && p.forecast.annualSales) || 0;
+    if (isNew(p) || !(last > 0) || !(next > 0)) return { pct: 0, needed: false };
+    const pct = (next / last - 1) * 100;
+    // אותה סובלנות כמו E.salesJump: 1,300,000/1,000,000 − 1 בנקודה צפה הוא 30.000000000000004,
+    // ו-30% בדיוק אינו "מעל 30%" (QA שיפור 4 ספרינט 1, באג 3)
+    return { pct, needed: pct > JUMP_PCT + 1e-9 };
+  }
+
+  /** המשפט שמוצג במסמך בפרק התחזית, כשיש קפיצה וכתוב הסבר */
+  function jumpDocNote(p, fmtPct) {
+    const j = jumpInfo(p);
+    const reason = txt(p && p.forecast && p.forecast.growthReason);
+    if (!j.needed || !reason) return '';
+    const pct = typeof fmtPct === 'function' ? fmtPct(j.pct) : String(Math.round(j.pct));
+    return `המחזור הצפוי גבוה בכ-${pct}% מהמחזור בשנה האחרונה. הסבר הבעלים לצמיחה: ${reason.replace(/[.\s]+$/, '')}.`;
+  }
+
+  /**
+   * תוצאות E.consistencyChecks, מנוקות ובטוחות לתצוגה: מערך ריק כשהפונקציה עוד לא
+   * קיימת או נכשלה, בלי בדיקות של עסק פועל בעסק חדש, בלי א3 כשכבר נכתב הסבר,
+   * ובלי כפילויות באותו ניסוח.
+   */
+  function checks(E, p) {
+    if (!E || typeof E.consistencyChecks !== 'function') return [];
+    let list;
+    try { list = E.consistencyChecks(p); } catch (e) { return []; }
+    if (!Array.isArray(list)) return [];
+    const fresh = isNew(p);
+    const reason = txt(p && p.forecast && p.forecast.growthReason);
+    const seen = new Set();
+    return list.filter((c) => c && txt(c.message)).map((c) => ({
+      code: String(c.code || ''),
+      severity: c.severity === 'block' ? 'block' : 'warn',
+      field: String(c.field || ''),
+      message: txt(c.message),
+    })).filter((c) => {
+      if (fresh && EXISTING_ONLY.some((re) => re.test(c.field))) return false;
+      if (reason && (c.field === JUMP_FIELD || A3_CODE.test(c.code))) return false;
+      if (seen.has(c.message)) return false;
+      seen.add(c.message);
+      return true;
+    });
+  }
+  const blocking = (list) => (list || []).filter((c) => c.severity === 'block');
+  const warnings = (list) => (list || []).filter((c) => c.severity !== 'block');
+  /** הבדיקות ששייכות לשדה מסוים. field של פריט ("loan.uses.2.type") שייך גם לשדה "loan.uses" */
+  function checksFor(list, key) {
+    return (list || []).filter((c) => c.field === key || c.field.indexOf(key + '.') === 0);
+  }
+
+  /** א4: הסיווג שהמנוע מציע לשם הפריט – 'capex', 'working' או null */
+  function useCategory(E, label) {
+    if (!E || typeof E.suggestUseCategory !== 'function' || !txt(label)) return null;
+    let r;
+    try { r = E.suggestUseCategory(label); } catch (e) { return null; }
+    if (r && typeof r === 'object') r = r.type || r.category;
+    return r === 'capex' || r === 'working' ? r : null;
+  }
+  const TYPE_LABEL = { capex: 'ציוד / השקעה', working: 'הון חוזר' };
+  /**
+   * א4: ההערה שמתחת לפריט בפירוט השימושים.
+   * warn – המשתמש בחר בעצמו סיווג שסותר את ההצעה. suggest – הסיווג נבחר אוטומטית.
+   */
+  function useRowNote(E, u) {
+    const sug = useCategory(E, u && u.item);
+    if (!sug) return { level: '', text: '' };
+    if (u.type && u.type !== sug) {
+      return { level: 'warn', text: `"${txt(u.item)}" נראה כמו ${TYPE_LABEL[sug]}, ולא ${TYPE_LABEL[u.type]}. בנק שיראה את הפריט מסווג כך ישאל למה. אם זה בכוונה, אפשר להשאיר.` };
+    }
+    return { level: 'suggest', text: `סווג כ${TYPE_LABEL[sug]} לפי שם הפריט` };
+  }
+  /** א4: סיווג אוטומטי כל עוד המשתמש לא בחר סיווג בעצמו. מחזיר true אם הסיווג השתנה. */
+  function autoClassify(E, u) {
+    if (!u || u.typeManual) return false;
+    const sug = useCategory(E, u.item);
+    if (!sug || u.type === sug) return false;
+    u.type = sug;
+    return true;
+  }
+
+  /**
+   * א6: שגיאה בשדה מספר שאין לו ברירת מחדל. zeroOk – 0 הוא תשובה תקינה (אין עובדים),
+   * ורק שדה ריק חסר. positive – 0 הוא שגיאה (בעסק פועל הוותק גדול מאפס; חצי שנה = 0.5).
+   */
+  function numberFieldError(f, v) {
+    if (!f || !f.req) return '';
+    const empty = v == null || v === '' || (typeof v === 'number' && !Number.isFinite(v));
+    if (empty) return f.errMsg || 'צריך למלא את השדה הזה';
+    if (f.positive && !(Number(v) > 0)) return f.zeroMsg || 'צריך מספר גדול מ-0';
+    return '';
+  }
+  /** ערך שדה מספר שמתחיל ריק: שדה ריק נשמר כ-null ולא כ-0 */
+  function nullableNumber(raw, parse) {
+    return txt(raw) === '' ? null : parse(raw);
+  }
+
+  /**
+   * ה(א): גישור על חודשי מינוס במסמך. עסק פועל – לא מצהירים על אשראי שהמשתמש לא מסר,
+   * אלא על מה שהעסק יבדוק ויעשה, כמו בכרטיס שבמסך ההלוואה.
+   */
+  const EXISTING_BRIDGE = 'לגישור על החודשים האלה יבדוק העסק מול הבנק אשראי לטווח קצר, ובמידת הצורך ידחה חלק מההשקעות או יוסיף חודשי גרייס להלוואה.';
+
+  /**
+   * ה(ב): האם שורת "החודש הדחוק" נכנסת לרשימת "כדאי לטפל" במסך הסיכום.
+   * כשהדירוג חזק, כרטיס תמונת המצב כבר אומר את זה (thinMonthNote), ולכן לא פעמיים.
+   */
+  function listThinMonth(res) {
+    return Boolean(res && res.cushion && res.cushion.level === 'warn' && !(res.rating && res.rating.level === 'ok'));
+  }
+
+  /**
+   * החלטת מאיר (28.09.2026): בתוכנית לדוגמה נשארות בכוונה נקודות שהכלי מזהה (למשל חודש
+   * דחוק וקפיצה במחזור בלי הסבר), כדי להדגים את הבדיקה לפני הגשה. כדי שזה לא ייראה כמו
+   * טעות שלנו, הדוגמה מציגה אותן במפורש כ"הכלי זיהה". רק בדוגמה (isSample) – בתוכנית של
+   * משתמש מחזירה null.
+   * res – תוצאת E.computePlan של אותה תוכנית.
+   */
+  function sampleJumpText(p) {
+    const j = jumpInfo(p);
+    if (!j.needed) return '';
+    return `המחזור בתחזית גבוה בכ-${Math.round(j.pct)}% מהמחזור בשנה שעברה, ולא נכתב הסבר לצמיחה. גם כשמטרת ההלוואה רומזת על הסיבה, הבנק מצפה להסבר מפורש ליד התחזית. בתוכנית שלכם הכלי מבקש את ההסבר, והוא נכנס למסמך בפרק התחזית.`;
+  }
+  function sampleDemo(E, p, res) {
+    if (!p || !p.isSample || !E) return null;
+    const items = [];
+    const push = (t) => { const x = txt(t).replace(/^שימו לב:\s*/, ''); if (x && !items.includes(x)) items.push(x); };
+    // א3 בדוגמה: הודעת הבדיקה כתובה כהוראה ("כתבו..."), וכאן היא מתארת מה הכלי זיהה
+    checks(E, p).forEach((c) => push(c.field === JUMP_FIELD ? sampleJumpText(p) || c.message : c.message));
+    const cushion = res && res.cushion;
+    if (cushion && cushion.level === 'warn' && typeof E.thinMonthNote === 'function') push(E.thinMonthNote(cushion));
+    if (cushion && cushion.level === 'risk' && typeof E.negativeMonthNote === 'function') push(E.negativeMonthNote(cushion, res.negativeMonths, isNew(p)));
+    if (typeof E.assumptionWarnings === 'function') E.assumptionWarnings(p).forEach((a) => push(a.text));
+    if (typeof E.conflictWarnings === 'function') E.conflictWarnings(p).forEach((c) => push(c.text));
+    if (!items.length) return null;
+    const n = items.length === 1 ? 'נקודה אחת' : `${items.length} נקודות`;
+    return {
+      title: 'מה הכלי תפס בדוגמה הזו',
+      intro: `בדוגמה השארנו בכוונה ${n} שהכלי מזהה, כדי להראות איך נראית בדיקה לפני הגשה לבנק. זו לא טעות בכלי: כך הוא מתריע גם על התוכנית שלכם, עוד לפני שמפיקים את המסמך, ומוביל אתכם לשדה שצריך לתקן.`,
+      items,
+    };
+  }
+
+  return { JUMP_PCT, JUMP_FIELD, jumpInfo, jumpDocNote, sampleDemo, checks, blocking, warnings, checksFor,
+    useCategory, useRowNote, autoClassify, TYPE_LABEL, numberFieldError, nullableNumber, EXISTING_BRIDGE, listThinMonth, isNew };
+})();
+if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
+
 (function () {
   'use strict';
+  if (typeof document === 'undefined') return; // ב-node נטענת רק הלוגיקה הטהורה שלמעלה
+  const U = BizplanUI;
   const E = window.Engine;
   const STORE_KEY = 'bizplan-v2';
   const $ = (id) => document.getElementById(id);
@@ -40,13 +213,14 @@
   const EMPTY = {
     isSample: false,
     // isNew = null עד שבוחרים: "העסק כבר פועל" או "עסק חדש שעוד לא נפתח"
-    business: { name: '', entity: 'osek', field: '', city: '', years: 0, employees: 0, description: '', isNew: null },
+    // א6: ותק ומספר עובדים מתחילים ריקים (null) ולא 0, כדי שמי שמדלג לא יישאר עם 0 בלי לשים לב
+    business: { name: '', entity: 'osek', field: '', city: '', years: null, employees: null, description: '', isNew: null },
     owner: { name: '', experience: '', education: '' },
     market: { customers: '', competitors: '', pricing: '', advantage: '' },
     history: { lastYearSales: 0, lastYearProfit: 0 },
     startup: { openDate: '', equity: 0, setupCosts: [{ item: '', amount: 0 }], preOpenCosts: 0, deposit: 0, equipmentVat: 0 },
     forecast: { annualSales: 0, rampMonths: 0, growthPct: 5, cogsPct: 30, monthlyFixed: 0, monthlySalaries: 0, ownerDrawMonthly: 0, openingCash: 0,
-      salesModel: 'total', customersPerDay: 0, avgTicket: 0, daysPerMonth: 26 },
+      salesModel: 'total', customersPerDay: 0, avgTicket: 0, daysPerMonth: 26, growthReason: '' },
     loan: { track: 'general', amount: 0, ratePct: 7.5, years: 5, graceMonths: 0, purpose: '', uses: [{ item: '', amount: 0, type: 'capex' }] },
   };
   const ENTITIES = { osek: 'עוסק מורשה', company: 'חברה בע"מ', partnership: 'שותפות' };
@@ -81,6 +255,11 @@
     { k: 'history.lastYearSales', label: 'כמה מכרתם בשנה שעברה?', type: 'money', hint: 'המחזור השנתי, לפני הוצאות' },
     { k: 'history.lastYearProfit', label: 'כמה הרווחתם בשנה שעברה?', type: 'money', signed: 1, hint: 'אם הפסדתם, כתבו את ההפסד עם מינוס (למשל -40,000)' },
     ...salesFields('כמה תמכרו בשנה, אחרי שתקבלו את ההלוואה?', 'ההערכה שלכם למכירות בשנה מלאה, כשהכול עובד כמו שצריך'),
+    // א3: מופיע רק כשהמחזור הצפוי גבוה ביותר מ-30% מהשנה שעברה, ואז הוא חובה ומוצג במסמך
+    { k: U.JUMP_FIELD, label: 'מה יגרום למכירות לגדול כל כך?', type: 'textarea', req: 1, wide: 1, keepHint: 1, showIf: (p) => U.jumpInfo(p).needed,
+      ph: 'למשל: תנור שני יכפיל את כושר הייצור, וכבר חתמנו על הזמנות משלוש מכולות חדשות',
+      hintFn: (p) => `המחזור שכתבתם גבוה בכ-${num(U.jumpInfo(p).pct)}% מהשנה שעברה. בנק שרואה קפיצה כזו ישאל מאיפה היא תגיע, וההסבר שלכם ייכנס למסמך בפרק התחזית.`,
+      errMsg: 'כתבו בכמה מילים מה יגרום לקפיצה במכירות. ההסבר ייכנס למסמך' },
     { k: 'forecast.rampMonths', label: 'תוך כמה זמן תגיעו לקצב המכירות הזה?', type: 'chips', wide: 1, opts: RAMP_OPTS },
     { k: 'forecast.growthPct', label: 'בכמה תגדלו כל שנה אחר כך?', type: 'chips', wide: 1, opts: GROWTH_OPTS },
   ] };
@@ -113,9 +292,12 @@
       { k: 'business.city', label: 'עיר', type: 'text', ph: 'למשל: בית שמש' },
       { k: 'business.field', label: 'במה העסק עוסק?', type: 'text', req: 1, wide: 1, ph: 'במשפט אחד, למשל: מאפייה ומכירת מאפים טריים' },
       { k: 'business.entity', label: 'סוג העסק', type: 'chips', opts: ENTITIES, wide: 1 },
-      { k: 'business.years', label: 'כמה שנים העסק פועל?', type: 'number', onlyExisting: 1 },
-      { k: 'business.employees', label: 'כמה עובדים יש?', type: 'number', hint: 'לא כולל אתכם', onlyExisting: 1 },
-      { k: 'business.employees', label: 'כמה עובדים תעסיקו בהתחלה?', type: 'number', hint: 'לא כולל אתכם. בלי עובדים: 0', onlyNew: 1 },
+      // א6: בלי ברירת מחדל 0. בעסק פועל שני השדות חובה, ו-0 שנים הוא שגיאה
+      { k: 'business.years', label: 'כמה שנים העסק פועל?', type: 'number', req: 1, nullable: 1, positive: 1, decimal: 1, onlyExisting: 1, ph: 'למשל: 3',
+        errMsg: 'כתבו כמה שנים העסק פועל', zeroMsg: 'בעסק שכבר פועל הוותק צריך להיות גדול מאפס. אם העסק נפתח לפני פחות משנה, כתבו חלק משנה (למשל 0.5 לחצי שנה).' },
+      { k: 'business.employees', label: 'כמה עובדים יש?', type: 'number', req: 1, nullable: 1, hint: 'לא כולל אתכם. בלי עובדים: 0', onlyExisting: 1, ph: 'למשל: 4',
+        errMsg: 'כתבו כמה עובדים יש בעסק. אם אין עובדים, כתבו 0' },
+      { k: 'business.employees', label: 'כמה עובדים תעסיקו בהתחלה?', type: 'number', nullable: 1, hint: 'לא כולל אתכם. בלי עובדים: 0', onlyNew: 1 },
       { k: 'business.description', label: 'תארו את העסק בכמה משפטים', type: 'textarea', req: 1, wide: 1, ph: 'מה אתם מוכרים, למי, ואיך העסק עובד ביום-יום' },
     ] },
     { name: 'אתם והשוק', kicker: 'האנשים והלקוחות', title: 'מי עומד מאחורי העסק?', intro: 'הבנק מלווה לאנשים, לא רק לעסקים. כמה משפטים על הניסיון שלכם ועל הלקוחות עושים הבדל.', fields: [
@@ -231,9 +413,22 @@
     if (typeof v === 'boolean') return false;
     return typeof v === 'number' ? !(v > 0) : !String(v ?? '').trim();
   }
+  /** שדה שמוצג רק בתנאי (א3: הסבר לקפיצה במחזור) */
+  function visible(f) { return !f.showIf || f.showIf(plan); }
+  /**
+   * הודעת השגיאה של שדה, או מחרוזת ריקה. שדות מספר בלי ברירת מחדל (א6) נבדקים
+   * לפי "ריק" ולא לפי "0", כי 0 עובדים היא תשובה תקינה. שדה של עסק פועל נדרש רק
+   * אחרי שבחרו "העסק כבר פועל".
+   */
+  function fieldErr(f) {
+    if (!f.req || !visible(f) || f.type === 'uses') return '';
+    if (f.onlyExisting && plan.business.isNew !== false) return '';
+    if (f.nullable) return U.numberFieldError(f, get(plan, f.k));
+    return isMissing(f) ? (f.errMsg || 'צריך למלא את השדה הזה') : '';
+  }
   function stepErrors(i) {
     const ST = steps();
-    const errs = ST[i].fields.filter((f) => f.req && f.type !== 'uses' && isMissing(f)).map((f) => f.k);
+    const errs = ST[i].fields.filter((f) => fieldErr(f)).map((f) => f.k);
     ST[i].fields.filter((f) => f.type === 'uses').forEach((f) => {
       const list = get(plan, f.k) || [];
       if (list.some((u) => Number(u.amount) > 0 && !String(u.item || '').trim())) errs.push(f.k);
@@ -275,7 +470,9 @@
   function fieldHtml(f) {
     const id = 'f-' + f.k.replace(/\./g, '-');
     const v = get(plan, f.k);
-    const bad = showErrors && f.req && isMissing(f);
+    const errText = showErrors ? fieldErr(f) : '';
+    const bad = Boolean(errText);
+    const hint = typeof f.hintFn === 'function' ? f.hintFn(plan) : f.hint;
     let input;
     if (f.type === 'uses') return usesHtml(f);
     if (f.type === 'sources') return sourcesBoxHtml(f);
@@ -295,15 +492,18 @@
     } else if (f.type === 'pct') {
       input = `<div class="money"><input id="${id}" data-key="${f.k}" data-num="1" type="text" inputmode="decimal" autocomplete="off" value="${v ?? ''}"><span class="cur">%</span></div>`;
     } else if (f.type === 'number') {
-      input = `<input id="${id}" data-key="${f.k}" data-num="1" type="text" inputmode="numeric" autocomplete="off" value="${v ?? ''}" style="max-width:160px">`;
+      input = `<input id="${id}" data-key="${f.k}" data-num="1"${f.nullable ? ' data-nullable="1"' : ''} type="text" inputmode="${f.decimal ? 'decimal' : 'numeric'}" autocomplete="off" value="${v ?? ''}" placeholder="${esc(f.ph || '')}" style="max-width:160px">`;
     } else {
       input = `<input id="${id}" data-key="${f.k}" type="text" autocomplete="off" value="${esc(v)}" placeholder="${esc(f.ph || '')}">`;
     }
     const group = f.type === 'choice' || f.type === 'static' || f.type === 'chips';
-    return `<div class="field${f.wide ? ' wide' : ''}${bad ? ' invalid' : ''}">
-      <label id="${id}-l"${group ? '' : ` for="${id}"`}>${esc(f.label)}${f.req ? '<span class="req" aria-label="חובה">*</span>' : ''}</label>
+    // req של שדה עסק-פועל מסומן בכוכבית רק אחרי שבחרו "העסק כבר פועל"
+    const star = f.req && !(f.onlyExisting && plan.business.isNew !== false);
+    return `<div class="field${f.wide ? ' wide' : ''}${bad ? ' invalid' : ''}" data-field="${esc(f.k)}"${visible(f) ? '' : ' hidden'}>
+      <label id="${id}-l"${group ? '' : ` for="${id}"`}>${esc(f.label)}${star ? '<span class="req" aria-label="חובה">*</span>' : ''}</label>
       ${input}
-      ${bad ? `<span class="err">${esc(f.errMsg || 'צריך למלא את השדה הזה')}</span>` : f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ''}
+      ${hint && (!bad || f.keepHint) ? `<span class="hint" data-hint-for="${esc(f.k)}">${esc(hint)}</span>` : ''}${bad ? `<span class="err">${esc(errText)}</span>` : ''}
+      ${checksBoxHtml(f.k)}
     </div>`;
   }
 
@@ -317,12 +517,79 @@
         <div class="money"><input id="${safeId}-amt-${i}" data-uses="${key}" data-use="${i}" data-f="amount" type="text" inputmode="numeric" data-money="1" placeholder="0" value="${u.amount ? num(u.amount) : ''}" aria-label="סכום פריט ${i + 1}"><span class="cur">₪</span></div>
         ${f.noType ? '' : `<select id="${safeId}-type-${i}" data-uses="${key}" data-use="${i}" data-f="type" aria-label="סוג פריט ${i + 1}"><option value="capex"${u.type === 'capex' ? ' selected' : ''}>ציוד / השקעה</option><option value="working"${u.type === 'working' ? ' selected' : ''}>הון חוזר</option></select>`}
         <button type="button" class="icon-btn" data-uses="${key}" data-del="${i}" aria-label="מחיקת פריט ${i + 1}">✕</button>
+        ${f.noType ? '' : `<p class="use-note" id="${safeId}-note-${i}" data-use-note="${key}" data-use="${i}" aria-live="polite">${useNoteHtml(u)}</p>`}
       </div>`).join('');
     const bad = showErrors && stepErrors(step).includes(key);
     const hint = f.hint || '"הון חוזר" = כסף לסחורה, מלאי והוצאות שוטפות עד שההשקעה מחזירה את עצמה';
-    return `<div class="field wide${bad ? ' invalid' : ''}"><label>${esc(f.label)}</label><div class="uses">${rows}</div>
+    return `<div class="field wide${bad ? ' invalid' : ''}" data-field="${esc(key)}"><label>${esc(f.label)}</label><div class="uses">${rows}</div>
       <div class="uses-foot"><button type="button" class="btn-text" data-add="${key}">+ הוספת פריט</button><span data-total="${key}">${usesTotalHtml(key)}</span></div>
-      ${bad ? '<span class="err">לכל פריט עם סכום צריך לכתוב על מה הוא</span>' : `<span class="hint">${esc(hint)}</span>`}</div>`;
+      ${bad ? '<span class="err">לכל פריט עם סכום צריך לכתוב על מה הוא</span>' : `<span class="hint">${esc(hint)}</span>`}
+      ${checksBoxHtml(key)}</div>`;
+  }
+  /** א4: ההערה שמתחת לפריט – סיווג שנבחר אוטומטית, או אזהרה על סיווג סותר */
+  function useNoteHtml(u) {
+    const n = U.useRowNote(E, u);
+    if (!n.level) return '';
+    return n.level === 'warn' ? `<span class="warn-text">${esc(n.text)}</span>` : `<span class="hint">${esc(n.text)}</span>`;
+  }
+
+  // ---------- שיפור 4: בדיקות עקביות (E.consistencyChecks) ----------
+  function currentChecks() { return U.checks(E, plan); }
+  function checkItemHtml(c) {
+    return c.severity === 'block'
+      ? `<p class="check check-block"><b>חובה לתקן לפני הפקת המסמך:</b> ${esc(c.message)}</p>`
+      : `<p class="check check-warn">${esc(c.message)}</p>`;
+  }
+  /**
+   * הבדיקות ששייכות לשדה, מתחת לשדה עצמו. בפירוט השימושים לא חוזרים על אזהרת
+   * סיווג שכבר מוצגת מתחת לפריט עצמו.
+   */
+  function checksForField(key, list) {
+    let items = U.checksFor(list || currentChecks(), key);
+    // שדה חובה ריק כבר מקבל הודעת "צריך למלא" משלו, ולכן לא מוסיפים עליו עוד הודעה
+    const own = (steps()[step] || { fields: [] }).fields.find((f) => f.k === key && f.req);
+    if (own && fieldErr(own)) items = items.filter((c) => c.field !== key);
+    if (key === 'loan.uses') {
+      const uses = get(plan, key) || [];
+      items = items.filter((c) => {
+        const m = c.field.match(/^loan\.uses\.(\d+)\./);
+        return !(m && uses[Number(m[1])] && U.useRowNote(E, uses[Number(m[1])]).level === 'warn');
+      });
+    }
+    return items;
+  }
+  function checksBoxHtml(key, list) {
+    return `<div class="checks" data-checks-for="${esc(key)}" aria-live="polite">${checksForField(key, list).map(checkItemHtml).join('')}</div>`;
+  }
+  /** באיזה שלב נמצא השדה שהבדיקה מצביעה עליו – לכפתור "לתיקון" */
+  function fieldStep(field) {
+    const ST = steps();
+    for (let i = 0; i < ST.length - 1; i++) {
+      if (ST[i].fields.some((f) => f.type !== 'static' && (field === f.k || field.indexOf(f.k + '.') === 0))) return i;
+    }
+    if (/^business\./.test(field)) return 0;
+    if (/^owner\./.test(field)) return isNewBiz() ? 2 : 1;
+    if (/^market\./.test(field)) return 1;
+    if (/^(history|startup)\.|^forecast\.(annualSales|rampMonths|growthPct|salesModel|customersPerDay|avgTicket|daysPerMonth|growthReason)/.test(field)) return 2;
+    if (/^forecast\./.test(field)) return 3;
+    return 4;
+  }
+  /** בדיקות של השלב הנוכחי שאין להן שדה מוצג בשלב – נכנסות לתיבת "כדאי לשים לב" */
+  function orphanChecks(i, list) {
+    const shown = steps()[i].fields.filter((f) => visible(f)).map((f) => f.k);
+    return (list || currentChecks()).filter((c) => fieldStep(c.field) === i && !shown.some((k) => c.field === k || c.field.indexOf(k + '.') === 0));
+  }
+  /** מעבר לשלב ולשדה עצמו, מכפתור "לתיקון" */
+  function focusField(field) {
+    if (!field) return;
+    const parts = field.split('.');
+    let el = document.querySelector(`[data-key="${CSS.escape(field)}"]`);
+    if (!el && parts.length >= 3 && /^\d+$/.test(parts[2])) el = document.getElementById(`${parts[0]}-${parts[1]}-${parts[3] === 'type' ? 'type' : 'item'}-${parts[2]}`);
+    const box = document.querySelector(`[data-field="${CSS.escape(parts.slice(0, 2).join('.'))}"]`) || (el && el.closest('.field'));
+    if (!el && box) el = box.querySelector('input, textarea, select, button');
+    const target = box || el;
+    if (target && target.scrollIntoView) target.scrollIntoView({ block: 'center' });
+    if (el) el.focus({ preventScroll: true });
   }
   /**
    * עסק בהקמה: השימושים בכספים נגזרים מעלויות ההקמה שהוזנו פעם אחת בשלב 3,
@@ -425,6 +692,8 @@
     const items = [];
     E.conflictWarnings(plan).forEach((c) => { if (conflictStep(c.key) === i) items.push(c.text); });
     E.assumptionWarnings(plan).forEach((a) => { if ((ASSUMPTION_STEP[a.code] || 3) === i) items.push(a.text); });
+    // שיפור 4: בדיקת עקביות שאין לה שדה בשלב הזה מוצגת כאן, ולא הולכת לאיבוד
+    orphanChecks(i).forEach((c) => { if (!items.includes(c.message)) items.push(c.severity === 'block' ? `חובה לתקן לפני הפקת המסמך: ${c.message}` : c.message); });
     return items;
   }
   function stepAlertsHtml() {
@@ -534,12 +803,23 @@
       return;
     }
     const res = E.computePlan(plan);
+    const cks = currentChecks();
+    const cBlocks = U.blocking(cks);
     // שלוש בדיקות התקינות חוסמות הפקת מסמך: כשהמספרים לא מתיישבים, אין מסמך (באג #3)
     if (res.blocking.length) {
       $('step-title').textContent = 'המספרים לא מתיישבים';
       $('step-intro').textContent = 'לא נפיק מסמך שבו אותו כסף מופיע בשני סכומים שונים. אחרי התיקון הכפתור יחזור:';
       $('form').innerHTML = `<ul class="fixes blocking">${res.blocking.map((c) =>
-        `<li><b>${esc(c.label)}</b><br>${esc(c.message)} <button type="button" class="btn-text" data-go="${blockingStep(c.code)}">לתיקון</button></li>`).join('')}</ul>`;
+        `<li><b>${esc(c.label)}</b><br>${esc(c.message)} <button type="button" class="btn-text" data-go="${blockingStep(c.code)}">לתיקון</button></li>`).join('')}${cBlocks.map(checkBlockLi).join('')}</ul>`
+        + checkWarnsHtml(U.warnings(cks));
+      $('next').hidden = true;
+      return;
+    }
+    // שיפור 4: בדיקות עקביות חוסמות (severity 'block'), כל אחת עם כפתור שמוביל לשדה עצמו
+    if (cBlocks.length) {
+      $('step-title').textContent = 'יש מה לתקן לפני שמפיקים את המסמך';
+      $('step-intro').textContent = 'הבנק קורא את כל התוכנית יחד, והנתונים האלה לא מתיישבים. אחרי התיקון יחזור הכפתור להפקת המסמך:';
+      $('form').innerHTML = `<ul class="fixes blocking">${cBlocks.map(checkBlockLi).join('')}</ul>` + checkWarnsHtml(U.warnings(cks));
       $('next').hidden = true;
       return;
     }
@@ -547,17 +827,32 @@
     const fixes = [...res.warnings, ...allAlerts()];
     // כשהדירוג חזק, כרטיס תמונת המצב שלמעלה כבר מפרט את חודשי המינוס ומה לעשות – בלי כפילות כאן
     if (res.negativeMonths.length && res.rating.level !== 'ok') fixes.push(`${E.negativeMonthsText(res.negativeMonths)} יהיה מינוס בחשבון. אפשר להוסיף גרייס, לדחות חלק מההשקעות או להתחיל עם יותר מזומן.`);
-    else if (res.cushion && res.cushion.level === 'warn') fixes.push(cushionText(res, 'wizard', plan));
+    // ה(ב): כשהדירוג חזק, הכרטיס כבר אומר שהחודש דחוק (thinMonthNote) – לא פעמיים
+    else if (U.listThinMonth(res)) fixes.push(cushionText(res, 'wizard', plan));
     const wc = E.workingCapitalNote(plan);
     if (wc) fixes.push(wc);
+    // שיפור 4: אזהרות עקביות (לא חוסמות) – עם כפתור לשדה. בלי לחזור על ניסוח שכבר ברשימה
+    const cWarns = U.warnings(cks).filter((c) => !fixes.includes(c.message));
     $('step-title').textContent = `התוכנית של ${plan.business.name} מוכנה`;
     $('step-intro').textContent = 'ככה הבקשה נראית במספרים. אפשר לחזור לכל שלב ולשנות.';
     // סעיף 9: "טוב לדעת מראש" הוא מידע למגיש ולא למסמך שמיועד לגוף המממן,
     // ולכן הוא מוצג כאן בממשק (וגם בשלב ההקמה), ולא בתוך התוכנית עצמה.
     $('form').innerHTML = snapshotHtml()
-      + (fixes.length ? `<h2 style="font-family:var(--serif);font-size:22px;margin:28px 0 0">כדאי לטפל לפני ההגשה</h2><ul class="fixes">${fixes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '')
+      + (fixes.length || cWarns.length ? `<h2 style="font-family:var(--serif);font-size:22px;margin:28px 0 0">כדאי לטפל לפני ההגשה</h2><ul class="fixes">${cWarns.map(checkWarnLi).join('')}${fixes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '')
       + (isNewBiz() ? goodToKnowHtml() : '');
     $('next').hidden = false;
+  }
+
+  function checkBlockLi(c) {
+    return `<li>${esc(c.message)} <button type="button" class="btn-text" data-go="${fieldStep(c.field)}" data-focus="${esc(c.field)}">לתיקון</button></li>`;
+  }
+  function checkWarnLi(c) {
+    return `<li>${esc(c.message)} <button type="button" class="btn-text" data-go="${fieldStep(c.field)}" data-focus="${esc(c.field)}">לבדיקה</button></li>`;
+  }
+  /** אזהרות לא חוסמות, מתחת לרשימת החסימות – כדי שהמשתמש יתקן הכול בסבב אחד */
+  function checkWarnsHtml(list) {
+    if (!list.length) return '';
+    return `<h2 style="font-family:var(--serif);font-size:22px;margin:28px 0 0">כדאי לבדוק גם</h2><ul class="fixes">${list.map(checkWarnLi).join('')}</ul>`;
   }
 
   /** לאיזה שלב לשלוח את המשתמש כדי לתקן בדיקת תקינות שנכשלה */
@@ -592,6 +887,7 @@
       // שער אחרון: בדיקות התקינות חוסמות הפקת מסמך, גם אם המשתמש הגיע לכאן עם דף פתוח
       const blocking = E.computePlan(plan).blocking;
       if (blocking.length) { toast('המספרים בתוכנית לא מתיישבים. יש לתקן לפני הפקת המסמך.'); renderSummary(); return; }
+      if (U.blocking(currentChecks()).length) { toast('יש נתונים שסותרים זה את זה. תקנו אותם לפני הפקת המסמך.'); renderSummary(); return; }
       viewingSample = false; renderDocument(plan); show('doc'); return;
     }
     const errs = stepErrors(step);
@@ -605,7 +901,7 @@
     go(step + 1);
   }
 
-  function refreshLive() {
+  function refreshLive(typingKey) {
     if (step === 4) {
       const snap = $('snapshot'); if (snap) snap.outerHTML = snapshotHtml();
       const box = $('sources-box');
@@ -619,6 +915,26 @@
     const alerts = $('step-alerts');
     if (alerts) alerts.outerHTML = stepAlertsHtml();
     document.querySelectorAll('[data-total]').forEach((el) => { el.innerHTML = usesTotalHtml(el.dataset.total); });
+    // שיפור 4: שדות שמופיעים בתנאי (א3), הערות סיווג (א4) ובדיקות העקביות ליד כל שדה
+    const ST = steps();
+    if (ST[step]) {
+      ST[step].fields.filter((f) => f.showIf || f.hintFn).forEach((f) => {
+        const box = document.querySelector(`[data-field="${CSS.escape(f.k)}"]`);
+        if (!box) return;
+        box.hidden = !visible(f);
+        const h = box.querySelector('[data-hint-for]');
+        if (h && f.hintFn) h.textContent = f.hintFn(plan);
+      });
+    }
+    document.querySelectorAll('[data-use-note]').forEach((el) => {
+      const u = (get(plan, el.dataset.useNote) || [])[Number(el.dataset.use)];
+      el.innerHTML = u ? useNoteHtml(u) : '';
+    });
+    const cks = currentChecks();
+    document.querySelectorAll('[data-checks-for]').forEach((el) => {
+      if (typingKey && el.dataset.checksFor === typingKey) return;
+      el.innerHTML = checksForField(el.dataset.checksFor, cks).map(checkItemHtml).join('');
+    });
   }
 
   // ---------- מסמך ----------
@@ -649,12 +965,14 @@
 
   /** סעיף 16 – כרטיסי המדדים בראש הדוח: חמישה מספרים, כל אחד עם הסבר בשפה פשוטה */
   function metricsHtml(p, res) {
+    // ב1, עסק בהקמה: כמה מהיתרה הנמוכה ביותר הוא הון חוזר שלא נוצל – מיד מתחת לכרטיס היתרה
+    const reserve = E.reserveNote(p, res);
     return `<section class="doc-metrics" aria-label="מדדים עיקריים">
         ${E.headlineMetrics(p, res).map((m) => `<div class="metric metric-${m.level}">
           <span class="m-label">${dt(m.label)}</span><b class="m-value">${dt(m.value)}</b>
           <span class="m-note">${dt(m.note)}</span>
         </div>`).join('')}
-      </section>`;
+      </section>${reserve ? `<p class="note reserve-note" id="reserve-note">${dt(reserve)}</p>` : ''}`;
   }
 
   // ---------- סעיף 17: גרפים ב-SVG טהור (בלי ספריית צד שלישי) ----------
@@ -818,7 +1136,8 @@
     const reconcile = `שני הצדדים מסתכמים באותו סכום, ${ils(rec.sourcesTotal)}. עלויות ההקמה (${ils(setupTotal)}) יוצאות בחודש הראשון בתזרים שבפרק 7, וההון החוזר נשאר בחשבון העסק למימון הפעילות השוטפת בתחילת הדרך.`;
     const n = p.loan.years * 12 - p.loan.graceMonths;
     const risks = [
-      res.negativeMonths.length ? `בתזרים צפויה יתרה שלילית ${E.negativeMonthsText(res.negativeMonths)}, והיתרה הנמוכה ביותר היא ${ils(res.cushion.min)} בחודש ${res.cushion.month}. ${E.bridgeText(isNew, E.workingCapitalTotal(p), res.cash)}` : cushionText(res, 'doc', p),
+      // ה(א): בעסק פועל לא קובעים שיש לו אשראי שלא נשאל עליו – אותו כיוון כמו בכרטיס ("לבדוק מול הבנק")
+      res.negativeMonths.length ? `בתזרים צפויה יתרה שלילית ${E.negativeMonthsText(res.negativeMonths)}, והיתרה הנמוכה ביותר היא ${ils(res.cushion.min)} בחודש ${res.cushion.month}. ${isNew ? E.bridgeText(isNew, E.workingCapitalTotal(p), res.cash) : U.EXISTING_BRIDGE}` : cushionText(res, 'doc', p),
       `רגישות למכירות: ירידה של 10% במכירות תקטין את הרווח התפעולי בשנה הראשונה בכ-${ils(y[0].revenue * 0.1 * (1 - p.forecast.cogsPct / 100))} (הפירוט המלא בטבלת התרחישים).`,
       `ריבית: התחזית מניחה ריבית שנתית של ${num(p.loan.ratePct, 1)}%. עלייה של 1% בריבית תגדיל את ההחזר החודשי בכ-${ils(E.spitzerPayment(p.loan.amount, p.loan.ratePct + 1, n) - E.spitzerPayment(p.loan.amount, p.loan.ratePct, n))}.`,
     ];
@@ -841,7 +1160,7 @@
       <section><h2>1. תקציר מנהלים</h2>
         <p>${isNew
     ? `${dtl(b.name)} הוא עסק חדש בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, שטרם נפתח${st.openDate ? ` ומתוכנן להיפתח ב${dtl(st.openDate)}` : ''}. ${b.employees > 0 ? `בתכנון להעסיק ${b.employees === 1 ? 'עובד אחד' : N(b.employees) + ' עובדים'}.` : 'בשלב הראשון ללא עובדים שכירים.'}`
-    : `${dtl(b.name)} פועל ${b.years === 1 ? 'שנה' : N(b.years) + ' שנים'} בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, ${dt(staff)}.`} ${isNew || !p.history.lastYearSales ? '' : `בשנה האחרונה הסתכם המחזור ב-${MS(p.history.lastYearSales)}, והעסק סיים אותה ב${dt(profitText(p.history.lastYearProfit))}. `}העסק מבקש הלוואה בסך ${MS(p.loan.amount)} ל-${N(p.loan.years)} שנים${p.loan.graceMonths ? `, עם גרייס של ${N(p.loan.graceMonths)} חודשים` : ''}${isNew && equity > 0 ? `, לצד הון עצמי של ${MS(equity)}` : ''}.</p>
+    : `${dtl(b.name)} פועל ${dt(E.yearsText(b.years))} בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, ${dt(staff)}.`} ${isNew || !p.history.lastYearSales ? '' : `בשנה האחרונה הסתכם המחזור ב-${MS(p.history.lastYearSales)}, והעסק סיים אותה ב${dt(profitText(p.history.lastYearProfit))}. `}העסק מבקש הלוואה בסך ${MS(p.loan.amount)} ל-${N(p.loan.years)} שנים${p.loan.graceMonths ? `, עם גרייס של ${N(p.loan.graceMonths)} חודשים` : ''}${isNew && equity > 0 ? `, לצד הון עצמי של ${MS(equity)}` : ''}.</p>
         <p>${dt(E.outlookText(y))} יחס כיסוי החוב הנמוך ביותר בתקופה הוא <strong>${Number.isFinite(res.minDscr) ? N(res.minDscr, 2) : '—'}</strong> (${dt(res.rating.label)}).${res.rating.level === 'ok' && res.cushion && res.cushion.level === 'risk' ? ` ${dt(E.negativeMonthSummary(res.cushion, res.negativeMonths))}` : ''}</p>
       </section>
       <section><h2>2. תיאור העסק</h2><p>${dt(b.description)}</p>
@@ -859,6 +1178,8 @@
       <section><h2>6. תחזית רווח והפסד ל-3 שנים</h2>
         <p class="note">הנחות: מחזור שנתי בקצב מלא של ${MS(p.forecast.annualSales)}${p.forecast.rampMonths ? `, שמושג בהדרגה בתוך ${N(p.forecast.rampMonths)} חודשים${isNew ? ' מיום הפתיחה, מאפס מכירות' : ''}` : ''}; צמיחה של ${N(p.forecast.growthPct, 1)}% בשנה; עלות מכר (הסחורה וחומרי הגלם שנכנסים למכירה) של ${N(p.forecast.cogsPct, 1)}%; עדכון הוצאות קבועות ושכר ב-3% בשנה.</p>
         ${E.usesBottomUp(p) ? `<p class="note">${dt(E.bottomUpText(p.forecast))}</p>` : ''}
+        ${U.jumpDocNote(p, (x) => num(x)) ? `<p class="note">${dt(U.jumpDocNote(p, (x) => num(x)))}</p>` : ''}
+        ${p.isSample && U.jumpInfo(p).needed && !String(p.forecast.growthReason || '').trim() ? `<p class="sample-flag">✓ הכלי זיהה (הדגמה): המחזור הצפוי גבוה בכ-${N(U.jumpInfo(p).pct)}% מהשנה שעברה, ובדוגמה לא נכתב הסבר. בתוכנית שלכם הכלי יבקש הסבר כזה, והוא יופיע כאן.</p>` : ''}
         <p class="note">המס מחושב לפי צורת ההתאגדות (${dt(ENTITIES[b.entity])}): ${dt(taxMethodText(b.entity))}. בשנה הראשונה, על רווח של ${MS(y[0].preTax)}, ההערכה היא ${MS(y[0].tax)} – כ-${N(y[0].taxEffectivePct, 1)}% מהרווח. ${dt(E.TAX.note)}</p>
         ${isNew ? '<p class="note">העסק טרם נפתח; ההנחות בתחזית מבוססות על תוכנית העסק ועל ניסיון הבעלים, ולא על נתונים היסטוריים – רמת אי-הוודאות גבוהה יותר מאשר בעסק פעיל.</p>' : ''}${pl}
         ${plChartHtml(res)}
@@ -867,7 +1188,7 @@
       <section class="page-break"><h2>7. תזרים מזומנים חודשי – שנה ראשונה</h2>${cf}
         ${cashChartHtml(res)}
         <p class="note">הטבלה מפרידה בין התקבולים לתשלומים: "סה"כ תקבולים" הוא כל הכסף שנכנס באותו חודש, "סה"כ תשלומים" הוא כל הכסף שיצא, ו"תזרים נטו בחודש" הוא ההפרש ביניהם. יתרת הסגירה היא יתרת הפתיחה ועוד התזרים נטו.</p>
-        <p class="note">שורת "${dt(taxCashRowLabel(b.entity))}" היא הערכה חודשית של המס שמשולם באותו חודש. סך השורה לכל השנה הוא המס המשוער של השנה הראשונה (${MS(res.years[0].tax)}), והוא מחולק בין החודשים לפי הפעילות בפועל של אותו חודש – כך שבחודשי ההרצה, שבהם המכירות עדיין נמוכות, התשלום נמוך, והוא עולה עם הקצב. כך עובדות מקדמות המס בפועל: המקדמה נגזרת מהפעילות של תקופת הדיווח ולא מחולקת שווה בשווה. זו הערכה בלבד: המועדים והסכומים המדויקים נקבעים ברשות המסים, ובביטוח לאומי המקדמה נגבית בסכום קבוע ומתעדכנת רק לפי בקשת תיקון מקדמות שהעסק יוזם. שורת "השקעות" היא ${isNew ? 'סך עלויות ההקמה' : 'סך פריטי ההשקעה (רכש ציוד ונכסים)'} שבפרק 5 (${MS(res.investment)}).${res.vat.amount > 0 ? ` המע"מ על רכישת הציוד (${MS(res.vat.amount)}) משולם בחודש הראשון וחוזר מרשות המסים בחודש ${N(res.vat.refundMonth)}; הוא אינו חלק מהשימושים בכספים שבפרק 5, אבל הוא צריך להיות בחשבון באותם חודשים.` : ''}</p></section>
+        <p class="note">שורת "${dt(taxCashRowLabel(b.entity))}" היא הערכה חודשית של המס שמשולם באותו חודש. סך השורה לכל השנה הוא המס המשוער של השנה הראשונה (${MS(res.years[0].tax)}), והוא מחולק בין החודשים לפי הפעילות בפועל של אותו חודש – כך שבחודשי ההרצה, שבהם המכירות עדיין נמוכות, התשלום נמוך, והוא עולה עם הקצב. כך עובדות מקדמות המס בפועל: המקדמה נגזרת מהפעילות של תקופת הדיווח ולא מחולקת שווה בשווה. זו הערכה בלבד: המועדים והסכומים המדויקים נקבעים ברשות המסים, ובביטוח לאומי המקדמה נגבית בסכום קבוע ומתעדכנת רק לפי בקשת תיקון מקדמות שהעסק יוזם. שורת "השקעות" היא ${isNew ? 'סך עלויות ההקמה' : 'סך פריטי ההשקעה (רכש ציוד ונכסים)'} שבפרק 5 (${MS(res.investment)}).${res.cash.some((r) => r.working > 0) ? ` שורת "הון חוזר (לפי פירוט השימושים)" היא הכסף מההלוואה שמיועד להוצאות השוטפות – סחורה, חומרי גלם ומלאי – ולא לציוד. בתחזית הוא יוצא כולו בחודש הראשון (${MS(res.cash.reduce((s, r) => s + (r.working || 0), 0))}), ולכן היתרה בחשבון לא כוללת כסף שכבר מיועד להוצאות האלה.` : ''}${res.vat.amount > 0 ? ` המע"מ על רכישת הציוד (${MS(res.vat.amount)}) משולם בחודש הראשון וחוזר מרשות המסים בחודש ${N(res.vat.refundMonth)}; הוא אינו חלק מהשימושים בכספים שבפרק 5, אבל הוא צריך להיות בחשבון באותם חודשים.` : ''}</p></section>
       <section><h2>8. ההלוואה ולוח הסילוקין</h2>
         <p>הלוואה של ${MS(p.loan.amount)} בריבית שנתית משוערת של ${N(p.loan.ratePct, 1)}%, בשיטת שפיצר, ל-${N(p.loan.years * 12)} חודשים${p.loan.graceMonths ? `, מתוכם ${N(p.loan.graceMonths)} חודשי גרייס (ריבית בלבד, ${MS(res.graceInterest)} בחודש)` : ''}. ההחזר החודשי: <strong>${MS(res.monthlyPayment)}</strong>. סך הריבית לכל התקופה: ${MS(res.totalInterest)}.</p>${am}
         ${collateralHtml(p)}</section>
@@ -875,13 +1196,22 @@
         <p class="note">יחס כיסוי חוב (DSCR) הוא המזומן הפנוי חלקי החזרי ההלוואה. יחס של 1.25 ומעלה נחשב בדרך כלל טוב.</p>
         <h3>תרחישים: מה קורה אם המכירות יהיו נמוכות מהתחזית</h3>
         ${scenariosHtml(p)}
-        <ul>${risks.map((r) => `<li>${dt(r)}</li>`).join('')}</ul></section>
+        <ul>${risks.map((r) => `<li>${dt(r)}</li>`).join('')}</ul>
+        ${p.isSample && res.cushion && res.cushion.level === 'warn' ? '<p class="sample-flag">✓ הכלי זיהה (הדגמה): המרווח הדק בתזרים, בסעיף הראשון ברשימה למעלה, נשאר בדוגמה בכוונה כדי להראות איך הכלי מתריע עליו.</p>' : ''}</section>
       <footer class="doc-foot">המסמך הוכן בכלי עזר ("תוכנית עסקית בקליק") על סמך נתונים שמסר בעל העסק. הוא אינו מהווה ייעוץ פיננסי, ואינו קשור לממשלה או לקרן. התחזיות הן הערכה בלבד.</footer>`;
 
     $('edit').hidden = !!p.isSample;
     $('next-steps').innerHTML = p.isSample
-      ? `<h2>זו תוכנית לדוגמה</h2><p style="margin:0 0 12px">ככה ייראה המסמך שלכם, עם המספרים של העסק שלכם.</p><button type="button" class="btn btn-primary" id="start-from-sample">בניית התוכנית שלי</button>`
+      ? `<h2>זו תוכנית לדוגמה</h2><p style="margin:0 0 12px">ככה ייראה המסמך שלכם, עם המספרים של העסק שלכם.</p>${sampleDemoHtml(p, res)}<button type="button" class="btn btn-primary" id="start-from-sample">בניית התוכנית שלי</button>`
       : `<h2>מה עושים עכשיו</h2><ol><li>לוחצים <b>"שמירת המסמך"</b>, פותחים את הקובץ ושומרים כ-PDF.</li><li>נכנסים לאתר הקרן להלוואות בערבות מדינה וממלאים את הבקשה.</li><li>מצרפים את ה-PDF, יחד עם הדוחות הכספיים ודפי החשבון שהקרן מבקשת.</li></ol>`;
+  }
+
+  /** החלטת מאיר: בדוגמה, הנקודות שהכלי זיהה מוצגות כהדגמה ולא כטעות */
+  function sampleDemoHtml(p, res) {
+    const d = U.sampleDemo(E, p, res);
+    if (!d) return '';
+    return `<div class="sample-demo" id="sample-demo"><h3>${esc(d.title)}</h3><p>${esc(d.intro)}</p>
+      <ul>${d.items.map((t) => `<li><span class="caught">✓ הכלי זיהה</span> ${esc(t)}</li>`).join('')}</ul></div>`;
   }
 
   // ---------- שמירה כקובץ ----------
@@ -951,22 +1281,35 @@ body{padding:24px 16px} .print-bar{max-width:840px;margin:0 auto 16px;display:fl
     if (t.dataset.key) {
       const isNum = t.dataset.money || t.dataset.num;
       set(plan, t.dataset.key, isNum ? (signed ? parseSigned(t.value) : parseNum(t.value)) : t.value);
+      // א6: שדה מספר בלי ברירת מחדל – ריק נשמר כ-null, לא כ-0
+      if (t.dataset.nullable) set(plan, t.dataset.key, U.nullableNumber(t.value, parseNum));
     } else if (t.dataset.use !== undefined) {
       const u = (get(plan, t.dataset.uses) || [])[Number(t.dataset.use)];
       if (u) u[t.dataset.f] = t.dataset.f === 'amount' ? parseNum(t.value) : t.value;
+      // א4: סיווג מוצע לפי שם הפריט, כל עוד לא בחרו סיווג בעצמם
+      if (u && t.dataset.f === 'item' && U.autoClassify(E, u)) {
+        const sel = document.getElementById(`${t.dataset.uses.replace(/\./g, '-')}-type-${t.dataset.use}`);
+        if (sel) sel.value = u.type;
+      }
     } else return;
     syncBottomUp(); // סעיף 14: המחזור השנתי מתעדכן מיד מהחישוב מלמטה
     plan.isSample = false;
     const field = t.closest('.field');
-    if (field && field.classList.contains('invalid') && String(t.value).trim()) { field.classList.remove('invalid'); const er = field.querySelector('.err'); if (er) er.remove(); }
+    if (field && field.classList.contains('invalid') && String(t.value).trim()) {
+      const f = t.dataset.key && steps()[step].fields.find((x) => x.k === t.dataset.key);
+      // א6: "0" בשדה ותק הוא עדיין שגיאה, ולכן ההודעה נשארת עד שהערך תקין
+      if (!(f && fieldErr(f))) { field.classList.remove('invalid'); const er = field.querySelector('.err'); if (er) er.remove(); }
+    }
     save();
-    refreshLive();
+    refreshLive(t.tagName === 'TEXTAREA' ? t.dataset.key : undefined);
   });
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (t.tagName === 'TEXTAREA' && t.dataset.key) refreshLive();
     if (t.dataset.use !== undefined && t.dataset.f === 'type') {
       const u = (get(plan, t.dataset.uses) || [])[Number(t.dataset.use)];
-      if (u) { u.type = t.value; save(); }
+      // א4: בחירה ידנית גוברת על ההצעה האוטומטית; אם היא סותרת את שם הפריט – אזהרה מתחת לפריט
+      if (u) { u.type = t.value; u.typeManual = true; plan.isSample = false; save(); refreshLive(); }
     }
   });
 
@@ -994,10 +1337,13 @@ body{padding:24px 16px} .print-bar{max-width:840px;margin:0 auto 16px;display:fl
         plan.forecast.openingCash = 0;
         // ברירת מחדל סבירה לעסק שמתחיל מאפס לקוחות; המשתמש יכול לשנות
         if (!plan.forecast.rampMonths) plan.forecast.rampMonths = 3;
+      } else if (!plan.business.years) {
+        // א6: עסק פועל לא מתחיל עם "0 שנים" – השדה ריק עד שממלאים
+        plan.business.years = null;
       }
       plan.isSample = false; save(); showErrors = false; renderStep();
     }
-    else if (t.dataset.go !== undefined) go(Number(t.dataset.go));
+    else if (t.dataset.go !== undefined) { go(Number(t.dataset.go)); if (t.dataset.focus) focusField(t.dataset.focus); }
     else if (t.dataset.add) {
       const list = get(plan, t.dataset.add);
       list.push(t.dataset.add === 'loan.uses' ? { item: '', amount: 0, type: 'capex' } : { item: '', amount: 0 });
