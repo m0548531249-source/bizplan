@@ -299,7 +299,8 @@ test('#4 מס: הטבלאות הן קונפיגורציה, עם הערה שזו 
 
 test('#5 מרווח תזרים: הסף הוא חודש הוצאות קבועות ושכר, לא "אין חודש שלילי"', () => {
   const res = E.computePlan(cafe());
-  assert.equal(res.cushion.threshold, 57000, 'הוצאות קבועות 22,000 ושכר 35,000');
+  // שיפור 4 ספרינט 2 (ב3): הסף = קבועות 22,000 + שכר 35,000 + עלות מכר חודשית ממוצעת
+  near(res.cushion.threshold, 57000 + res.cash.reduce((s, c) => s + c.cogs, 0) / 12, 1);
   assert.equal(res.cushion.month, 3, 'החודש הנמוך ביותר');
   near(res.cushion.min, ROUND(res.cash[2].closing), 1);
   // מאז פריסת המס לפי הפעילות בפועל (27.09.2026) התזרים לא נכנס למינוס, אבל היתרה

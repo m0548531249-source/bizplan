@@ -89,19 +89,23 @@ for (const [name, plan] of TAX_CASES) {
   });
 }
 
-test('פריסת מס: שיעור המס זהה בכל החודשים הרווחיים (מס חלקי רווח חודשי)', () => {
+// עודכן בשיפור 4 ספרינט 2 (ב2, אורי): "שיעור זהה על הרווח אחרי ריבית" הוא בדיוק מה שגרם
+// למס לעלות ב-10 ₪ בכל חודש כשהמכירות קבועות (הריבית יורדת). הכלל עכשיו: חודשים עם אותו
+// מחזור משלמים אותו מס, וחודשי ההרצה (מחזור שונה) עדיין ממושקלים לפי הרווח.
+test('פריסת מס: חודשים עם אותו מחזור – אותו מס; חודש עם מחזור גבוה יותר – מס גבוה יותר (ב2)', () => {
   const plan = cafe();
   const res = E.computePlan(plan);
   const f = plan.forecast;
-  const sched = E.amortization(200000, 7.5, 5, 0);
-  const rates = [];
+  const byRev = new Map();
   for (let m = 1; m <= 12; m++) {
-    const rev = (f.annualSales / 12) * E.salesLevel({ ...f, currentSales: 0 }, m);
-    const profit = rev * 0.7 - 57000 - sched[m - 1].interest;
-    if (profit > 0) rates.push(res.cash[m - 1].tax / profit);
+    const rev = Math.round((f.annualSales / 12) * E.salesLevel({ ...f, currentSales: 0 }, m));
+    (byRev.get(rev) || byRev.set(rev, []).get(rev)).push(res.cash[m - 1].tax);
   }
-  const spread = Math.max(...rates) - Math.min(...rates);
-  assert.ok(spread < 1e-9, `שיעורים שונים בין חודשים: ${rates.map((r) => r.toFixed(4)).join(', ')}`);
+  for (const [rev, taxes] of byRev) {
+    assert.ok(Math.max(...taxes) - Math.min(...taxes) < 1e-6, `מחזור ${rev}: ${taxes.map(Math.round).join(', ')}`);
+  }
+  const t = res.cash.map((c) => c.tax);
+  assert.ok(t[3] >= t[2] && t[2] >= t[1], 'בהרצה המס לא יורד כשהמחזור עולה');
 });
 
 test('פריסת מס: לפני/אחרי – המס השנתי ויתרת סוף השנה לא השתנו, רק הפיזור', () => {

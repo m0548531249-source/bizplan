@@ -128,7 +128,8 @@ test('קפה פינת חן: המספרים של תרחיש הבסיס לא הש�
   const res = E.computePlan(cafe());
   assert.equal(R(res.cushion.min), 11699, 'היתרה הנמוכה ביותר (כמו בסבב QA 6)');
   assert.equal(res.cushion.month, 3);
-  assert.equal(res.cushion.threshold, 57000);
+  // שיפור 4 ספרינט 2 (ב3): הסף כולל גם עלות מכר חודשית ממוצעת, לא רק 57,000 של קבועות ושכר
+  assert.equal(R(res.cushion.threshold), R(57000 + res.cash.reduce((s, c) => s + c.cogs, 0) / 12));
   assert.deepEqual(res.negativeMonths, []);
   assert.equal(res.minDscr.toFixed(2), '2.67');
   assert.equal(res.rating.level, 'ok');

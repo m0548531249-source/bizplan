@@ -165,8 +165,71 @@ const BizplanUI = (function () {
     };
   }
 
-  return { JUMP_PCT, JUMP_FIELD, jumpInfo, jumpDocNote, sampleDemo, checks, blocking, warnings, checksFor,
-    useCategory, useRowNote, autoClassify, TYPE_LABEL, numberFieldError, nullableNumber, EXISTING_BRIDGE, listThinMonth, isNew };
+  /**
+   * שיפור 4 ספרינט 2, ג2 – רגישות בתקציר: משפט אחד כשירידה של 10% במכירות מורידה את יחס
+   * כיסוי החוב הנמוך ביותר מתחת ל-1.25 (במאפייה לדוגמה: 1.88 → 1.16). כשתרחיש הבסיס כבר
+   * מתחת ל-1.25 הירידה לא "מורידה" אותו לשם – התקציר כבר אומר את זה בדירוג – ואין משפט.
+   * שתי חתימות: (list, phrase) – תוצאת E.scenarios ו-E.dscrPhrase (אופציונלי) לניסוח הרמה;
+   * או (E, plan) – כמו U.checks(E, p). קלט אחר מחזיר null.
+   * הערך מוצג בשתי ספרות, ולכן ההשוואה נעשית על הערך המעוגל: 1.249 לא יוצג "1.25, מתחת ל-1.25".
+   */
+  const SENS_DSCR = 1.25;
+  function sensitivityNote(a, second) {
+    let arr, phrase;
+    if (a && typeof a.scenarios === 'function') { arr = a.scenarios(second); phrase = a.dscrPhrase; }
+    else if (Array.isArray(a)) { arr = a; phrase = second; }
+    else return null;
+    const base = arr.find((s) => s && s.key === 'base');
+    const down = arr.find((s) => s && s.key === 'down10');
+    if (!base || !down) return '';
+    const b = Number(base.minDscr), d = Number(down.minDscr);
+    if (!Number.isFinite(b) || !Number.isFinite(d) || b < SENS_DSCR) return '';
+    const shown = Math.round(d * 100) / 100;
+    if (!(shown < SENS_DSCR)) return '';
+    const ph = typeof phrase === 'function' ? phrase(d) : null;
+    const level = ph && ph.text ? `${ph.text}; ` : '';
+    return `רגישות למכירות: אם המכירות יהיו נמוכות ב-10% מהתחזית, יחס כיסוי החוב הנמוך ביותר יירד ל-${shown.toFixed(2)}, מתחת לרף של 1.25 שנחשב טוב (${level}הפירוט בטבלת התרחישים בפרק 9).`;
+  }
+
+  /**
+   * שיפור 4 ספרינט 2, ג3 – כרטיסי המדדים בראש המסמך: "חודש האיזון" נמדד משנת ההקמה,
+   * ובעסק שפועל כבר שנים הוא יוצא "חודש 1" חסר המשמעות – לכן מוצג רק בעסק בהקמה.
+   */
+  function visibleMetrics(cards, p) {
+    const list = Array.isArray(cards) ? cards : [];
+    return isNew(p) ? list : list.filter((m) => m && m.key !== 'breakeven');
+  }
+
+  /**
+   * שיפור 4 ספרינט 2, ב3 – תיאור הסף של "חודש אחד של הוצאות". מאז ב3 הסף כולל גם עלות
+   * מכר (במאפייה 99,479 ₪ ולא 50,000), ולכן הניסוח "הוצאות קבועות ושכר" כבר לא נכון.
+   * c – res.cushion. כשאין עלות מכר (thresholdParts.cogs = 0) נשאר הניסוח הקצר.
+   */
+  function thresholdLabel(c) {
+    // מקור יחיד ב-engine.js (E.thresholdLabel), כדי שגם thinMonthNote במנוע ישתמש באותו כלל
+    const eng = (typeof window !== 'undefined' && window.Engine) || (typeof require === 'function' ? require('./engine.js') : null);
+    return eng.thresholdLabel(c);
+  }
+
+  /**
+   * שיפור 4 ספרינט 2, ב5 – משפט אחד כשהשנה הראשונה תקינה אבל בהמשך תקופת ההלוואה
+   * (לרוב אחרי הגרייס) היתרה בחשבון יורדת למינוס. res – תוצאת E.computePlan;
+   * monthText – E.periodMonthText; where – 'doc' למסמך לבנק (גוף שלישי, בלי עצה). '' כשאין מצב כזה.
+   */
+  function laterNegativeNote(res, monthText, money, where) {
+    const y1 = res && res.cushion, all = res && res.cushionPeriod;
+    if (!y1 || !all || !(y1.min >= 0) || !(all.min < 0)) return '';
+    const when = typeof monthText === 'function' ? monthText(all.month) : `חודש ${all.month}`;
+    // "מינוס של 75,280 ₪" ולא "ל--75,280": בלי מקף כפול ובלי סימן מינוס שמתהפך בעברית
+    const amount = typeof money === 'function' ? money(Math.abs(all.min)) : String(Math.round(Math.abs(all.min)));
+    // במסמך לבנק (where === 'doc'): ניסוח עובדתי בגוף שלישי, בלי עצה למשתמש
+    if (where === 'doc') return `בשנה הראשונה החשבון נשאר ביתרה חיובית, אך לפי התחזית בהמשך תקופת ההלוואה צפויה בו יתרה שלילית של ${amount} (ב${when}).`;
+    return `בשנה הראשונה החשבון נשאר ביתרה חיובית, אבל בהמשך תקופת ההלוואה הוא צפוי לרדת למינוס של ${amount} (ב${when}), ולכן כדאי לבדוק מראש הארכת גרייס, סכום הלוואה אחר או דחיית חלק מההשקעות.`;
+  }
+
+  return { JUMP_PCT, JUMP_FIELD, jumpInfo, jumpDocNote, sampleDemo, checks, blocking, warnings, checksFor, thresholdLabel, laterNegativeNote,
+    useCategory, useRowNote, autoClassify, TYPE_LABEL, numberFieldError, nullableNumber, EXISTING_BRIDGE, listThinMonth, isNew,
+    SENS_DSCR, sensitivityNote, visibleMetrics };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
 
@@ -829,6 +892,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
     if (res.negativeMonths.length && res.rating.level !== 'ok') fixes.push(`${E.negativeMonthsText(res.negativeMonths)} יהיה מינוס בחשבון. אפשר להוסיף גרייס, לדחות חלק מההשקעות או להתחיל עם יותר מזומן.`);
     // ה(ב): כשהדירוג חזק, הכרטיס כבר אומר שהחודש דחוק (thinMonthNote) – לא פעמיים
     else if (U.listThinMonth(res)) fixes.push(cushionText(res, 'wizard', plan));
+    // ב5: שנה 1 תקינה ושנה מאוחרת במינוס – משפט אחד ברשימה
+    const later = U.laterNegativeNote(res, E.periodMonthText, ils);
+    if (later) fixes.push(later);
     const wc = E.workingCapitalNote(plan);
     if (wc) fixes.push(wc);
     // שיפור 4: אזהרות עקביות (לא חוסמות) – עם כפתור לשדה. בלי לחזור על ניסוח שכבר ברשימה
@@ -863,7 +929,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
 
   /**
    * המרווח בתזרים – משפט שנגזר מהיתרה המינימלית בפועל מול סף של חודש הוצאות
-   * קבועות ושכר, ולא מהצהרה קבועה "התזרים יישאר חיובי" (באג #5).
+   * (קבועות, שכר ועלות מכר – ב3), ולא מהצהרה קבועה "התזרים יישאר חיובי" (באג #5).
    * ניסוח המענה בענף האזהרה שבמסמך נגזר מסוג העסק (E.thinCushionText), כדי שלא
    * נצהיר לבנק על אשראי בנקאי שאין לעסק שעוד לא נפתח.
    */
@@ -872,12 +938,17 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
     if (!c) return '';
     const min = `${ils(Math.max(0, c.min))} בחודש ${c.month}`;
     if (c.level === 'warn') {
-      const base = `היתרה הנמוכה ביותר בתזרים היא ${min} – פחות מחודש אחד של הוצאות קבועות ושכר (${ils(c.threshold)}).`;
+      // ב3: הסף כולל עכשיו גם עלות מכר – הניסוח מתאר את כל מה שבתוכו
+      const base = `היתרה הנמוכה ביותר בתזרים היא ${min} – פחות מחודש אחד של הוצאות (${U.thresholdLabel(c)}: ${ils(c.threshold)}).`;
+      // ב5: c הוא השנה הראשונה בלבד. כשבהמשך ההלוואה יש מינוס (cushionPeriod, laterNegativeNote)
+      // הטענה מוגבלת לשנה הראשונה, כדי שלא תסתור את משפט המינוס שבא אחריה
+      const laterNeg = !!(res.cushionPeriod && res.cushionPeriod.min < 0);
+      const who = laterNeg ? 'בשנה הראשונה התזרים' : 'התזרים';
       return where === 'wizard'
-        ? `${base} התזרים לא נכנס למינוס, אבל המרווח דק: עיכוב בתקבולים או הוצאה לא מתוכננת יכניסו את החשבון למינוס. כדאי להתחיל עם יותר מזומן, להוסיף גרייס או לדחות חלק מההשקעות.`
-        : `${base} התזרים אינו נכנס למינוס בתחזית, אך המרווח דק; ${E.thinCushionText(isNewBiz(p), E.workingCapitalTotal(p || plan), res.cash)}`;
+        ? `${base} ${who} לא נכנס למינוס, אבל המרווח דק: עיכוב בתקבולים או הוצאה לא מתוכננת יכניסו את החשבון למינוס. כדאי להתחיל עם יותר מזומן, להוסיף גרייס או לדחות חלק מההשקעות.`
+        : `${base} ${who} אינו נכנס למינוס${laterNeg ? '' : ' בתחזית'}, אך המרווח דק; ${E.thinCushionText(isNewBiz(p), E.workingCapitalTotal(p || plan), res.cash)}`;
     }
-    return `היתרה הנמוכה ביותר בתזרים היא ${min}, יותר מחודש אחד של הוצאות קבועות ושכר (${ils(c.threshold)}). התזרים החודשי צפוי להישאר חיובי לאורך כל השנה הראשונה.`;
+    return `היתרה הנמוכה ביותר בתזרים היא ${min}, יותר מחודש אחד של הוצאות (${U.thresholdLabel(c)}: ${ils(c.threshold)}). התזרים החודשי צפוי להישאר חיובי לאורך כל השנה הראשונה.`;
   }
 
   function go(i) { step = Math.max(0, Math.min(steps().length - 1, i)); showErrors = false; renderStep(); window.scrollTo(0, 0); }
@@ -967,8 +1038,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
   function metricsHtml(p, res) {
     // ב1, עסק בהקמה: כמה מהיתרה הנמוכה ביותר הוא הון חוזר שלא נוצל – מיד מתחת לכרטיס היתרה
     const reserve = E.reserveNote(p, res);
-    return `<section class="doc-metrics" aria-label="מדדים עיקריים">
-        ${E.headlineMetrics(p, res).map((m) => `<div class="metric metric-${m.level}">
+    // ג3: בעסק פועל אין כרטיס "חודש האיזון"; מספר העמודות לפי מספר הכרטיסים (--cols)
+    const cards = U.visibleMetrics(E.headlineMetrics(p, res), p);
+    // קוסמטי מסבב 2: כשיש משפט רזרבה, כרטיס היתרה עובר לסוף השורה, כדי שבטלפון המשפט
+    // יופיע מיד מתחתיו ולא אחרי כרטיס "חודש האיזון"
+    return `<section class="doc-metrics${reserve ? ' has-reserve' : ''}" style="--cols:${cards.length}" aria-label="מדדים עיקריים">
+        ${cards.map((m) => `<div class="metric metric-${m.level} metric-key-${m.key}">
           <span class="m-label">${dt(m.label)}</span><b class="m-value">${dt(m.value)}</b>
           <span class="m-note">${dt(m.note)}</span>
         </div>`).join('')}
@@ -1045,9 +1120,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
       cls: s.key === 'base' ? 'sub' : '',
       cells: [dt(s.label), M(s.revenue), M(s.ebitda),
         Number.isFinite(s.minDscr) ? `<span class="${s.minDscr < 1.25 ? 'neg' : ''}">${N(s.minDscr, 2)}</span>` : '—',
-        `<span class="${s.minCash < 0 ? 'neg' : ''}">${M(s.minCash)}</span>`],
+        // ב5: היתרה הנמוכה בכל תקופת ההלוואה, ומתחת לסכום – מתי (למשל "חודש 12 בשנה החמישית")
+        `<span class="${s.minCash < 0 ? 'neg' : ''}">${M(s.minCash)}</span>${s.minCashText ? `<span class="sc-when">${dt(s.minCashText)}</span>` : ''}`],
     }));
-    const t = table(['תרחיש', 'מחזור שנה 1', 'רווח תפעולי שנה 1', 'יחס כיסוי חוב מינימלי', 'יתרת מזומן מינימלית'], rows, 'scenarios',
+    const t = table(['תרחיש', 'מחזור שנה 1', 'רווח תפעולי שנה 1', 'יחס כיסוי חוב מינימלי', 'יתרת מזומן מינימלית (לאורך כל תקופת ההלוואה)'], rows, 'scenarios',
       `${E.MONEY_CAPTION}. עמודת יחס כיסוי החוב היא יחס בין מספרים, ולא סכום`);
     return `${t}<p class="note">${dt(E.scenarioNote(list))}</p>`;
   }
@@ -1075,6 +1151,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
     const st = p.startup || { openDate: '', equity: 0, setupCosts: [] };
     const equity = Number(st.equity) || 0;
     const share = E.equityShare(equity, p.loan.amount);
+    // ג2: רגישות בתקציר – ירידה של 10% במכירות שמורידה את יחס הכיסוי מתחת ל-1.25
+    const sensitivity = U.sensitivityNote(E.scenarios(p), E.dscrPhrase);
     const staff = b.employees > 0 ? `ומעסיק ${b.employees === 1 ? 'עובד אחד' : b.employees + ' עובדים'}` : 'ללא עובדים שכירים';
     const pl = table(['', 'שנה 1', 'שנה 2', 'שנה 3'], [
       { cells: ['הכנסות', ...y.map((r) => M(r.revenue))] },
@@ -1138,6 +1216,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
     const risks = [
       // ה(א): בעסק פועל לא קובעים שיש לו אשראי שלא נשאל עליו – אותו כיוון כמו בכרטיס ("לבדוק מול הבנק")
       res.negativeMonths.length ? `בתזרים צפויה יתרה שלילית ${E.negativeMonthsText(res.negativeMonths)}, והיתרה הנמוכה ביותר היא ${ils(res.cushion.min)} בחודש ${res.cushion.month}. ${isNew ? E.bridgeText(isNew, E.workingCapitalTotal(p), res.cash) : U.EXISTING_BRIDGE}` : cushionText(res, 'doc', p),
+      // ב5: שנה 1 תקינה, אבל בהמשך התקופה (אחרי הגרייס) החשבון יורד למינוס
+      ...(U.laterNegativeNote(res, E.periodMonthText, ils) ? [U.laterNegativeNote(res, E.periodMonthText, ils, 'doc')] : []),
       `רגישות למכירות: ירידה של 10% במכירות תקטין את הרווח התפעולי בשנה הראשונה בכ-${ils(y[0].revenue * 0.1 * (1 - p.forecast.cogsPct / 100))} (הפירוט המלא בטבלת התרחישים).`,
       `ריבית: התחזית מניחה ריבית שנתית של ${num(p.loan.ratePct, 1)}%. עלייה של 1% בריבית תגדיל את ההחזר החודשי בכ-${ils(E.spitzerPayment(p.loan.amount, p.loan.ratePct + 1, n) - E.spitzerPayment(p.loan.amount, p.loan.ratePct, n))}.`,
     ];
@@ -1160,8 +1240,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = BizplanUI;
       <section><h2>1. תקציר מנהלים</h2>
         <p>${isNew
     ? `${dtl(b.name)} הוא עסק חדש בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, שטרם נפתח${st.openDate ? ` ומתוכנן להיפתח ב${dtl(st.openDate)}` : ''}. ${b.employees > 0 ? `בתכנון להעסיק ${b.employees === 1 ? 'עובד אחד' : N(b.employees) + ' עובדים'}.` : 'בשלב הראשון ללא עובדים שכירים.'}`
-    : `${dtl(b.name)} פועל ${dt(E.yearsText(b.years))} בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, ${dt(staff)}.`} ${isNew || !p.history.lastYearSales ? '' : `בשנה האחרונה הסתכם המחזור ב-${MS(p.history.lastYearSales)}, והעסק סיים אותה ב${dt(profitText(p.history.lastYearProfit))}. `}העסק מבקש הלוואה בסך ${MS(p.loan.amount)} ל-${N(p.loan.years)} שנים${p.loan.graceMonths ? `, עם גרייס של ${N(p.loan.graceMonths)} חודשים` : ''}${isNew && equity > 0 ? `, לצד הון עצמי של ${MS(equity)}` : ''}.</p>
-        <p>${dt(E.outlookText(y))} יחס כיסוי החוב הנמוך ביותר בתקופה הוא <strong>${Number.isFinite(res.minDscr) ? N(res.minDscr, 2) : '—'}</strong> (${dt(res.rating.label)}).${res.rating.level === 'ok' && res.cushion && res.cushion.level === 'risk' ? ` ${dt(E.negativeMonthSummary(res.cushion, res.negativeMonths))}` : ''}</p>
+    : `${dtl(b.name) ? `העסק, ${dtl(b.name)},` : 'העסק'} פועל ${dt(E.yearsText(b.years))} בתחום ${dtl(b.field)}${b.city ? ' ב' + dtl(b.city) : ''}, ${dt(staff)}.`} ${isNew || !p.history.lastYearSales ? '' : `בשנה האחרונה הסתכם המחזור ב-${MS(p.history.lastYearSales)}, והעסק סיים אותה ב${dt(profitText(p.history.lastYearProfit))}. `}העסק מבקש הלוואה בסך ${MS(p.loan.amount)} ל-${N(p.loan.years)} שנים${p.loan.graceMonths ? `, עם גרייס של ${N(p.loan.graceMonths)} חודשים` : ''}${isNew && equity > 0 ? `, לצד הון עצמי של ${MS(equity)}` : ''}.</p>
+        <p>${dt(E.outlookText(y))} יחס כיסוי החוב הנמוך ביותר בתקופה הוא <strong>${Number.isFinite(res.minDscr) ? N(res.minDscr, 2) : '—'}</strong> (${dt(res.rating.label)}).${res.rating.level === 'ok' && res.cushion && res.cushion.level === 'risk' ? ` ${dt(E.negativeMonthSummary(res.cushion, res.negativeMonths))}` : ''}${sensitivity ? ` ${dt(sensitivity)}` : ''}</p>
       </section>
       <section><h2>2. תיאור העסק</h2><p>${dt(b.description)}</p>
         <dl class="facts"><div><dt>צורת התאגדות</dt><dd>${dt(ENTITIES[b.entity])}</dd></div><div><dt>${dt(status.label)}</dt><dd>${dt(status.value)}</dd></div><div><dt>עובדים</dt><dd>${N(b.employees)}</dd></div><div><dt>מיקום</dt><dd>${dtl(b.city) || '—'}</dd></div>

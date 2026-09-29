@@ -208,35 +208,45 @@
    */
   function forecast(f, schedule) {
     const debt = debtByYear(schedule || []);
-    const monthly = f.annualSales / 12;
-    return [1, 2, 3].map((y) => {
-      const growth = Math.pow(1 + (f.growthPct || 0) / 100, y - 1);
-      let revenue;
-      if (y === 1) {
-        revenue = 0;
-        for (let m = 1; m <= 12; m++) revenue += monthly * salesLevel(f, m);
-      } else {
-        revenue = f.annualSales * growth;
-      }
-      const inflate = Math.pow(1 + INFLATION, y - 1);
-      const cogs = revenue * (f.cogsPct || 0) / 100;
-      const fixed = (f.monthlyFixed || 0) * 12 * inflate;
-      const salaries = (f.monthlySalaries || 0) * 12 * inflate;
-      const ebitda = revenue - cogs - fixed - salaries;
-      const d = debt[y - 1] || { payment: 0, interest: 0 };
-      const preTax = ebitda - d.interest;
-      const t = taxFor(preTax, f.entity);
-      const tax = t.total;
-      const net = preTax - tax;
-      const ownerDraw = (f.ownerDrawMonthly || 0) * 12;
-      const cfads = ebitda - tax - ownerDraw; // מזומן פנוי לשירות החוב
-      return {
-        year: y, revenue, cogs, grossProfit: revenue - cogs, fixed, salaries, ebitda,
-        interest: d.interest, preTax, tax, incomeTax: t.incomeTax, ni: t.ni, taxEffectivePct: t.effectivePct,
-        net, ownerDraw, debtService: d.payment, cfads,
-        dscr: d.payment > 0 ? cfads / d.payment : Infinity,
-      };
-    });
+    return [1, 2, 3].map((y) => yearFigures(f, y, debt[y - 1]));
+  }
+
+  /**
+   * רווח והפסד של שנה אחת (y), עם החוב של אותה שנה (d). משותף ל-forecast (שנים 1–3)
+   * ולתזרים לכל תקופת ההלוואה (cashflowPeriod, שיפור 4 ב5).
+   * levelYear – השנה שלפיה נקבעים המכירות וההוצאות. אחרי אופק התחזית (3 שנים) המכירות
+   * וההוצאות נשארות ברמת שנה 3, בלי צמיחה ובלי התייקרות נוספת: הכלי לא מנחש מעבר למה
+   * שהמשתמש תחזה. רק החוב (ריבית והחזר) הוא של השנה בפועל.
+   */
+  function yearFigures(f, y, d0, levelYear) {
+    const ly = levelYear || y;
+    const growth = Math.pow(1 + (f.growthPct || 0) / 100, ly - 1);
+    let revenue;
+    if (ly === 1) {
+      const monthly = f.annualSales / 12;
+      revenue = 0;
+      for (let m = 1; m <= 12; m++) revenue += monthly * salesLevel(f, m);
+    } else {
+      revenue = f.annualSales * growth;
+    }
+    const inflate = Math.pow(1 + INFLATION, ly - 1);
+    const cogs = revenue * (f.cogsPct || 0) / 100;
+    const fixed = (f.monthlyFixed || 0) * 12 * inflate;
+    const salaries = (f.monthlySalaries || 0) * 12 * inflate;
+    const ebitda = revenue - cogs - fixed - salaries;
+    const d = d0 || { payment: 0, interest: 0 };
+    const preTax = ebitda - d.interest;
+    const t = taxFor(preTax, f.entity);
+    const tax = t.total;
+    const net = preTax - tax;
+    const ownerDraw = (f.ownerDrawMonthly || 0) * 12;
+    const cfads = ebitda - tax - ownerDraw; // מזומן פנוי לשירות החוב
+    return {
+      year: y, revenue, cogs, grossProfit: revenue - cogs, fixed, salaries, ebitda,
+      interest: d.interest, preTax, tax, incomeTax: t.incomeTax, ni: t.ni, taxEffectivePct: t.effectivePct,
+      net, ownerDraw, debtService: d.payment, cfads,
+      dscr: d.payment > 0 ? cfads / d.payment : Infinity,
+    };
   }
 
   /**
@@ -253,6 +263,13 @@
    * על הרווח של כל חודש. חודש בהפסד (הוצאות גבוהות מההכנסות) מקבל משקל 0 – אין ממה
    * לגבות מס – והרווח נספר לפי אותו בסיס שעליו חושב המס השנתי: הכנסות פחות עלות מכר,
    * הוצאות קבועות, שכר וריבית. סך המס לא משתנה, רק פריסתו.
+   *
+   * שיפור 4, ב2 – חודשים עם אותן מכירות משלמים אותו מס: הריבית בשפיצר יורדת מחודש
+   * לחודש אחרי הגרייס, ולכן המשקל לבדו העלה את המס ב-10 ₪ בכל חודש גם כשהמכירות
+   * קבועות (10,370 → 10,380 → ... → 10,420 בתוכנית לדוגמה). זו מגמה מלאכותית: המקדמה
+   * נגזרת מהמחזור של התקופה, לא מיתרת ההלוואה. לכן, אחרי השקלול, כל קבוצת חודשים
+   * עם מחזור זהה מקבלת את ממוצע המס של הקבוצה. חודשי ההרצה (מחזור שונה) לא זזים,
+   * הסכום השנתי לא משתנה, ומכירות קבועות = מס חודשי קבוע.
    *
    * קירוב, ומודע לכך: ביטוח לאומי נגבה טכנית בסכום קבוע ומתעדכן רק אם העצמאי יוזם
    * בקשת תיקון מקדמות (זכות רגילה כשההכנסה נמוכה ב-10%+, מה שמתקיים בחודשי הרצה).
@@ -271,17 +288,28 @@
     const total = Math.max(0, Number(annualTax) || 0);
     const monthly = (Number(f && f.annualSales) || 0) / 12;
     const weights = [];
+    const revenues = [];
     for (let m = 1; m <= 12; m++) {
       const revenue = monthly * salesLevel(f, m);
       const interest = (schedule && schedule[m - 1]) ? (Number(schedule[m - 1].interest) || 0) : 0;
       const profit = revenue * (1 - (Number(f && f.cogsPct) || 0) / 100)
         - (Number(f && f.monthlyFixed) || 0) - (Number(f && f.monthlySalaries) || 0) - interest;
       weights.push(Math.max(0, profit));
+      revenues.push(revenue);
     }
     const sum = weights.reduce((s, w) => s + w, 0);
     // בלי רווח חודשי חיובי בכלל אין על מה לפרוס, וחוזרים לחלוקה שווה כדי לא לאבד את הסכום
     if (!(sum > 0)) return weights.map(() => total / 12);
-    return weights.map((w) => (total * w) / sum);
+    const raw = weights.map((w) => (total * w) / sum);
+    // ב2: חודשים עם אותו מחזור (עד אגורה) מקבלים את ממוצע המס של הקבוצה שלהם
+    const groups = new Map();
+    revenues.forEach((r, i) => {
+      const key = Math.round(r * 100);
+      const g = groups.get(key) || { sum: 0, n: 0 };
+      g.sum += raw[i]; g.n += 1;
+      groups.set(key, g);
+    });
+    return revenues.map((r) => { const g = groups.get(Math.round(r * 100)); return g.sum / g.n; });
   }
 
   /**
@@ -337,6 +365,58 @@
       rows.push({ month: m, opening, revenue, loanIn, equityIn, vatIn, cogs, fixed, salaries, draw, debt, invest, working, tax, vatOut, inflow, outflow, closing: cash });
     }
     return rows;
+  }
+
+  /**
+   * שיפור 4, ב5 – תזרים חודשי לכל תקופת ההלוואה, לא רק לשנה הראשונה.
+   * השנה הקשה היא לרוב שנה 2: הגרייס נגמר, ההחזר קופץ מריבית בלבד לקרן וריבית, והעסק
+   * כבר לא נהנה מהכסף שנכנס בחודש 1. טבלת התזרים במסמך נשארת של השנה הראשונה; הפונקציה
+   * הזאת משמשת לחישוב היתרה הנמוכה ביותר לאורך כל התקופה (בתרחישים ובתוכנית עצמה).
+   *
+   * שנה 1 – בדיוק השורות של cashflow (firstYear). משנה 2 – כל חודש הוא 1/12 מהשנה
+   * שלו לפי forecast (שנים 2–3), כולל המס של אותה שנה; ההחזר – מלוח הסילוקין בפועל.
+   * אחרי שנה 3 (אופק התחזית) המכירות וההוצאות נשארות ברמת שנה 3 (ראו yearFigures).
+   * אורך: כל חודשי ההלוואה, ולפחות 12.
+   *
+   * @returns {object[]} שורות באותו מבנה של cashflow, ועוד year ו-monthInYear. month רץ 1..N.
+   */
+  function cashflowPeriod(f, schedule, firstYear, years) {
+    const sched = schedule || [];
+    const rows = (firstYear || []).map((r) => ({ ...r, year: 1, monthInYear: r.month }));
+    const total = Math.max(12, sched.length);
+    const debt = debtByYear(sched);
+    let cash = rows.length ? rows[rows.length - 1].closing : (f.openingCash || 0);
+    for (let m = rows.length + 1; m <= total; m++) {
+      const y = Math.ceil(m / 12);
+      const yf = (years && years[y - 1]) || yearFigures(f, y, debt[y - 1], Math.min(y, 3));
+      const revenue = yf.revenue / 12;
+      const cogs = yf.cogs / 12;
+      const fixed = yf.fixed / 12;
+      const salaries = yf.salaries / 12;
+      const draw = yf.ownerDraw / 12;
+      const tax = Math.max(0, yf.tax) / 12;
+      const debtPay = sched[m - 1] ? sched[m - 1].payment : 0;
+      const opening = cash;
+      const inflow = revenue;
+      const outflow = cogs + fixed + salaries + draw + debtPay + tax;
+      cash = opening + inflow - outflow;
+      rows.push({ month: m, year: y, monthInYear: m - (y - 1) * 12, opening, revenue, loanIn: 0, equityIn: 0, vatIn: 0,
+        cogs, fixed, salaries, draw, debt: debtPay, invest: 0, working: 0, tax, vatOut: 0, inflow, outflow, closing: cash });
+    }
+    return rows;
+  }
+
+  /**
+   * "חודש 18" בשפה של בנקאי: "חודש 6 בשנה השנייה". בשנה הראשונה – "חודש X" כמו קודם.
+   * month רץ לאורך כל התקופה (1..N).
+   */
+  const YEAR_ORD = ['', 'הראשונה', 'השנייה', 'השלישית', 'הרביעית', 'החמישית', 'השישית', 'השביעית', 'השמינית', 'התשיעית', 'העשירית'];
+  function periodMonthText(month) {
+    const m = Math.max(1, Math.round(Number(month) || 1));
+    if (m <= 12) return `חודש ${m}`;
+    const y = Math.ceil(m / 12);
+    const inYear = m - (y - 1) * 12;
+    return `חודש ${inYear} ${YEAR_ORD[y] ? `בשנה ${YEAR_ORD[y]}` : `בשנה ${y}`}`;
   }
 
   /** דירוג יכולת החזר לפי DSCR */
@@ -635,17 +715,35 @@
   }
 
   /**
-   * המרווח בתזרים: היתרה המינימלית בפועל מול סף של הוצאה חודשית קבועה אחת
-   * (הוצאות קבועות ושכר). 'risk' – החשבון נכנס למינוס; 'warn' – נשאר חיובי אבל
-   * מתחת לסף; 'ok' – מעל הסף. במקום ההצהרה "התזרים יישאר חיובי" (באג #5).
+   * המרווח בתזרים: היתרה המינימלית בפועל מול סף של "חודש אחד של הוצאות":
+   * הוצאות קבועות + שכר + עלות מכר חודשית ממוצעת. 'risk' – החשבון נכנס למינוס;
+   * 'warn' – נשאר חיובי אבל מתחת לסף; 'ok' – מעל הסף. במקום ההצהרה "התזרים יישאר
+   * חיובי" (באג #5).
+   *
+   * שיפור 4, ב3: עד עכשיו הסף היה קבועות + שכר בלבד (50,000 ₪ במאפייה לדוגמה), אבל
+   * עלות המכר (חומרי גלם, סחורה) היא הוצאה חודשית לכל דבר – עם עלות מכר מדובר בכ-100,000 ₪.
+   * עלות המכר החודשית הממוצעת נלקחת משורות התזרים עצמן (c.cogs), כך שחודשי ההרצה
+   * נספרים לפי מה שבאמת יצא בהם.
+   *
+   * @param {object[]} rows שורות התזרים שבהן מחפשים את היתרה הנמוכה ביותר
+   * @param {object} f הנחות התחזית (monthlyFixed, monthlySalaries)
+   * @param {object[]} [baseRows] השורות שמהן מחושב ממוצע עלות המכר (ברירת מחדל: rows).
+   *   משמש לתזרים של כל תקופת ההלוואה, כדי שהסף יהיה זהה לסף של השנה הראשונה.
+   * @returns {{min, month, threshold, thresholdParts:{fixed, salaries, cogs}, level, monthsCovered}|null}
    */
-  function cashCushion(rows, f) {
+  function cashCushion(rows, f, baseRows) {
     const list = rows || [];
     if (!list.length) return null;
     const worst = list.reduce((a, c) => (c.closing < a.closing ? c : a));
-    const threshold = (Number(f && f.monthlyFixed) || 0) + (Number(f && f.monthlySalaries) || 0);
+    const base = Array.isArray(baseRows) && baseRows.length ? baseRows : list;
+    const parts = {
+      fixed: Number(f && f.monthlyFixed) || 0,
+      salaries: Number(f && f.monthlySalaries) || 0,
+      cogs: Math.max(0, base.reduce((s, c) => s + (Number(c && c.cogs) || 0), 0) / base.length),
+    };
+    const threshold = parts.fixed + parts.salaries + parts.cogs;
     const level = worst.closing < 0 ? 'risk' : (threshold > 0 && worst.closing < threshold ? 'warn' : 'ok');
-    return { min: worst.closing, month: worst.month, threshold, level, monthsCovered: threshold > 0 ? worst.closing / threshold : null };
+    return { min: worst.closing, month: worst.month, threshold, thresholdParts: parts, level, monthsCovered: threshold > 0 ? worst.closing / threshold : null };
   }
 
   /** חישוב מלא של תוכנית */
@@ -693,6 +791,10 @@
       warnings: validatePlan(plan),
       conflicts: conflictWarnings(plan),
     };
+    // ב5: התזרים לכל תקופת ההלוואה. הסף ("חודש של הוצאות") נשאר זה של השנה הראשונה.
+    res.cashPeriod = cashflowPeriod(f, schedule, cash, years);
+    res.cushionPeriod = cashCushion(res.cashPeriod, f, cash);
+    res.negativeMonthsPeriod = res.cashPeriod.filter((c) => c.closing < 0).map((c) => c.month);
     res.assumptions = assumptionWarnings(plan);
     res.checks = integrityChecks(plan, res);
     res.blocking = res.checks.filter((c) => !c.ok);
@@ -849,7 +951,18 @@
    */
   function thinMonthNote(cushion) {
     if (!cushion || cushion.level !== 'warn') return '';
-    return `שימו לב: בחודש ${cushion.month} התזרים דחוק – בחשבון צפויים להישאר ${ils(Math.max(0, cushion.min))} בלבד, פחות מחודש אחד של הוצאות קבועות ושכר.`;
+    return `שימו לב: בחודש ${cushion.month} התזרים דחוק – בחשבון צפויים להישאר ${ils(Math.max(0, cushion.min))} בלבד, פחות מחודש אחד של הוצאות (${thresholdLabel(cushion)}).`;
+  }
+
+  /**
+   * שיפור 4 ספרינט 2, ב3 – תיאור הסף של "חודש אחד של הוצאות" (cushion.threshold).
+   * מקור יחיד: גם thinMonthNote וגם BizplanUI.thresholdLabel ב-app.js משתמשים בו.
+   * כשאין עלות מכר (thresholdParts.cogs = 0) – הניסוח הקצר, בלי "עלות מכר".
+   */
+  function thresholdLabel(c) {
+    const parts = c && c.thresholdParts;
+    if (parts && !(Number(parts.cogs) > 0)) return 'הוצאות קבועות ושכר';
+    return 'הוצאות קבועות, שכר ועלות מכר, כלומר סחורה וחומרי גלם';
   }
 
   /**
@@ -1392,6 +1505,9 @@
       key: 'cash', label: 'יתרת המזומן הנמוכה ביותר', value: ils(cushion.min), level: cushion.level,
       note: `זו היתרה בחשבון בסוף חודש ${cushion.month}, החודש הנמוך ביותר בשנה הראשונה.`,
     });
+    // שיפור 4, ג3: "חודש האיזון" רלוונטי רק לעסק בהקמה. בעסק שפועל שנים הוא תמיד
+    // "חודש 1" ואין לו משמעות, ולכן הכרטיס לא נכלל בכלל.
+    if (!asksEquity) return cards;
     cards.push({
       key: 'breakeven', label: 'חודש האיזון',
       value: be ? `חודש ${num(be)}` : 'לא בשנה הראשונה',
@@ -1587,12 +1703,16 @@
    * שלושה תרחישים: בסיס, ‎-10% ו-‎-20% במכירות. ההוצאות הקבועות, השכר, ההלוואה
    * וההחזרים נשארים כפי שהם – זו בדיוק הנקודה: מה קורה כשהמכירות מאכזבות.
    * לכל תרחיש: הרווח התפעולי בשנה הראשונה, יחס כיסוי החוב הנמוך ביותר בשלוש השנים,
-   * והיתרה הנמוכה ביותר בתזרים השנה הראשונה.
+   * והיתרה הנמוכה ביותר בתזרים לאורך כל תקופת ההלוואה (שיפור 4, ב5 – עד עכשיו רק
+   * השנה הראשונה, והשנה הקשה היא לרוב שנה 2, אחרי הגרייס).
+   * minCashMonth רץ לאורך כל התקופה (18 = חודש 6 בשנה השנייה); minCashYear ו-
+   * minCashText (למשל "חודש 6 בשנה השנייה") – לתצוגה. minCashYear1 – היתרה הנמוכה
+   * בשנה הראשונה בלבד, להשוואה. negativeMonths – מספר חודשי המינוס בכל התקופה.
    */
   function scenarios(plan) {
     return SCENARIOS.map((s) => {
       const res = computePlan(s.pct ? scenarioPlan(plan, s.pct) : plan);
-      const cushion = res.cushion || { min: 0, month: 1, level: 'ok' };
+      const cushion = res.cushionPeriod || res.cushion || { min: 0, month: 1, level: 'ok' };
       const rating = dscrLevel(res.minDscr);
       return {
         key: s.key, label: s.label, pct: s.pct,
@@ -1603,7 +1723,11 @@
         dscrLevel: rating.level,
         minCash: cushion.min,
         minCashMonth: cushion.month,
-        negativeMonths: res.negativeMonths.length,
+        minCashYear: Math.ceil(cushion.month / 12),
+        minCashText: periodMonthText(cushion.month),
+        minCashYear1: res.cushion ? res.cushion.min : cushion.min,
+        periodMonths: (res.cashPeriod || res.cash).length,
+        negativeMonths: (res.negativeMonthsPeriod || res.negativeMonths).length,
         level: cushion.min < 0 || res.minDscr < 1 ? 'risk' : (rating.level === 'ok' && cushion.level === 'ok' ? 'ok' : 'warn'),
       };
     });
@@ -1644,16 +1768,16 @@
     const firstNeg = rows.find((r) => r.minCash < 0);
     if (baseRow && baseRow.minCash < 0) {
       const deeper = worst !== baseRow && worst.minCash < baseRow.minCash
-        ? `, ו${drop(worst)} המינוס מעמיק ל-${ils(worst.minCash)}`
+        ? `, ו${drop(worst)} המינוס מעמיק ל-${ils(Math.abs(worst.minCash))}`
         : '';
-      parts.push(`כבר בתחזית הבסיס, בלי שום ירידה במכירות, החשבון נכנס למינוס (יתרה נמוכה של ${ils(baseRow.minCash)} בחודש ${baseRow.minCashMonth})${deeper}.`);
+      parts.push(`כבר בתחזית הבסיס, בלי שום ירידה במכירות, החשבון נכנס למינוס (יתרה נמוכה של ${ils(baseRow.minCash)} ב${periodMonthText(baseRow.minCashMonth)})${deeper}.`);
     } else if (firstNeg) {
       const deeper = worst !== firstNeg && worst.minCash < firstNeg.minCash
-        ? `, ו${drop(worst)} היתרה הנמוכה יורדת ל-${ils(worst.minCash)}`
+        ? `, ו${drop(worst)} היתרה הנמוכה יורדת ${worst.minCash < 0 ? `למינוס של ${ils(Math.abs(worst.minCash))}` : `ל-${ils(worst.minCash)}`}`
         : '';
-      parts.push(`${firstNeg === worst ? 'ב' : 'כבר ב'}תרחיש של ירידה של ${num(-firstNeg.pct)}% במכירות החשבון נכנס למינוס (יתרה נמוכה של ${ils(firstNeg.minCash)} בחודש ${firstNeg.minCashMonth})${deeper}.`);
+      parts.push(`${firstNeg === worst ? 'ב' : 'כבר ב'}תרחיש של ירידה של ${num(-firstNeg.pct)}% במכירות החשבון נכנס למינוס (יתרה נמוכה של ${ils(firstNeg.minCash)} ב${periodMonthText(firstNeg.minCashMonth)})${deeper}.`);
     } else {
-      parts.push(`גם ${drop(worst)} היתרה הנמוכה ביותר בחשבון נשארת חיובית (${ils(worst.minCash)}).`);
+      parts.push(`גם ${drop(worst)} היתרה הנמוכה ביותר בחשבון, לאורך כל תקופת ההלוואה, נשארת חיובית (${ils(worst.minCash)}).`);
     }
 
     // 2. יחס כיסוי החוב בתרחיש הגרוע, לפי שלוש הרמות. אם המשפט הקודם כבר נקב
@@ -1706,8 +1830,14 @@
     const frac = v - whole;
     const base = (n) => (n === 1 ? 'שנה' : (n === 2 ? 'שנתיים' : `${num(n)} שנים`));
     if (frac < 1e-9) return base(whole);
-    if (Math.abs(frac - 0.5) < 1e-9) return `${base(whole)} וחצי`;
-    return `${num(v, 1)} שנים`;
+    // שיפור 4 ספרינט 2 (קוסמטי מ-QA סבב 2): שבר שאינו חצי – בחודשים, לא "1.3 שנים".
+    // 1.25 → "שנה ו-3 חודשים", 2.1 → "שנתיים וחודש". עיגול ל-12 חודשים עובר לשנה הבאה.
+    const months = Math.round(frac * 12);
+    if (months === 0) return base(whole);
+    if (months === 12) return base(whole + 1);
+    if (months === 6) return `${base(whole)} וחצי`;
+    const mt = months === 1 ? 'וחודש' : (months === 2 ? 'וחודשיים' : `ו-${months} חודשים`);
+    return `${base(whole)} ${mt}`;
   }
 
   function businessStatus(plan) {
@@ -1776,7 +1906,7 @@
     return { heading: 'ביטחונות וערבויות', paragraphs, requirement: req };
   }
 
-  const api = { FUND, TRACKS, AFFORD, TAX, maxLoan, spitzerPayment, amortization, debtByYear, rampFactor, salesLevel, bracketTax, nationalInsurance, niDeductibleExpense, taxFor, taxSpread, forecast, cashflow, dscrLevel, affordLevel, loanForPayment, roundAmount, repaymentOptions, equityShare, validatePlan, isNewBusiness, equityInflow, setupCostsTotal, sourcesTotal, planUses, usesTotal, investmentTotal, integrityChecks, integrityFailures, cashCushion, computePlan, ils, parseAmount, moneyText, profitText, negativeMonthsText, workingCapitalNote, workingCapitalTotal, unusedWorkingCapital, bridgeText, thinCushionText, thinMonthNote, negativeMonthNote, negativeMonthSummary,
+  const api = { FUND, TRACKS, AFFORD, TAX, maxLoan, spitzerPayment, amortization, debtByYear, rampFactor, salesLevel, bracketTax, nationalInsurance, niDeductibleExpense, taxFor, taxSpread, forecast, cashflow, dscrLevel, affordLevel, loanForPayment, roundAmount, repaymentOptions, equityShare, validatePlan, isNewBusiness, equityInflow, setupCostsTotal, sourcesTotal, planUses, usesTotal, investmentTotal, integrityChecks, integrityFailures, cashCushion, cashflowPeriod, periodMonthText, computePlan, ils, parseAmount, moneyText, profitText, negativeMonthsText, workingCapitalNote, workingCapitalTotal, unusedWorkingCapital, bridgeText, thinCushionText, thinMonthNote, thresholdLabel, negativeMonthNote, negativeMonthSummary,
     // גל ב' (סעיפים 6–15)
     outlookText, DEPRECIATION_NOTE, ownerDrawNote, reconciliation, conflictWarnings, CONFLICT_FIELDS,
     ASSUMPTIONS, operatingMarginPct, assumptionWarnings, setupExtras, SETUP_EXTRA_FIELDS, equipmentVat,
